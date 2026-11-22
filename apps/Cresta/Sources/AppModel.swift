@@ -183,6 +183,7 @@ final class AppModel {
 
     private func becameActive() {
         guard isLoaded else { return }
+        autoResetBackpacksIfNeeded()
         if data.strava.connected { syncStrava(silent: true) }
         backfillWeather()
     }
@@ -661,6 +662,10 @@ final class AppModel {
             guard let b = d.backpacks.firstIndex(where: { $0.id == backpackID }),
                   let i = d.backpacks[b].items.firstIndex(where: { $0.id == itemID }) else { return }
             d.backpacks[b].items[i].checked.toggle()
+            // Ticks made now belong to the next outing.
+            if d.backpacks[b].lastReset == nil || d.outings.contains(where: { $0.createdAt > d.backpacks[b].lastReset! }) {
+                d.backpacks[b].lastReset = Date()
+            }
         }
     }
 

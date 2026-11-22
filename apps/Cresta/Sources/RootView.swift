@@ -62,7 +62,6 @@ struct RootView: View {
             }
         }
         .animation(.m3Spatial, value: model.toast)
-        .onAppear { model.autoResetBackpacksIfNeeded() }
     }
 }
 
