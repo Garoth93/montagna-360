@@ -733,6 +733,22 @@ final class AppModel {
         goCache[id] = nil
     }
 
+    func moveGoTargetToTop(_ id: UUID) {
+        mutate { d in
+            guard let i = d.goTargets.firstIndex(where: { $0.id == id }) else { return }
+            d.goTargets.insert(d.goTargets.remove(at: i), at: 0)
+        }
+    }
+
+    /// Refreshes the places whose data is older than 30 minutes (or all).
+    func refreshAllGo(force: Bool) async {
+        await withTaskGroup(of: Void.self) { group in
+            for t in data.goTargets where force || (goCache[t.id]?.fetchedAt.timeIntervalSinceNow ?? -99_999) < -1800 {
+                group.addTask { await self.refreshGo(t) }
+            }
+        }
+    }
+
     func refreshGo(_ t: GoTarget) async {
         async let forecast = try? Net.get(OpenMeteo.forecastURL(t.coordinate, pastDays: 30, elevation: t.elevation))
         async let avalanche = AvalancheService.fetch(region: t.avalancheRegion, fallbackURL: data.settings.avalancheFallbackURL)

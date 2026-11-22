@@ -90,6 +90,16 @@ public enum OpenMeteo {
 
     static func fmt(_ v: Double) -> String { String(format: "%.4f", v) }
 
+    /// Terrain elevation (Copernicus DEM, 90 m) for a point.
+    public static func elevationURL(_ c: Coordinate) -> URL {
+        URL(string: "https://api.open-meteo.com/v1/elevation?latitude=\(fmt(c.lat))&longitude=\(fmt(c.lon))")!
+    }
+
+    public static func decodeElevation(_ data: Data) -> Double? {
+        struct R: Decodable { var elevation: [Double]? }
+        return (try? JSONDecoder().decode(R.self, from: data))?.elevation?.first
+    }
+
     public struct Hourly: Decodable, Sendable {
         public var time: [String]
         public var temperature_2m: [Double?]?

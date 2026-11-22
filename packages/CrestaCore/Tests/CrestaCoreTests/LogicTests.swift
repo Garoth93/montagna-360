@@ -162,6 +162,9 @@ final class LogicTests: XCTestCase {
         XCTAssertEqual(w.maxWind, 30)
         XCTAssertEqual(w.worstCode, 61)
         XCTAssertEqual(w.minFreezingLevel, 1200)
+        XCTAssertEqual(OpenMeteo.decodeElevation(Data(#"{"elevation":[1918.0]}"#.utf8)), 1918)
+        XCTAssertNil(OpenMeteo.decodeElevation(Data("x".utf8)))
+        XCTAssertTrue(OpenMeteo.elevationURL(Coordinate(lat: 10, lon: 20)).absoluteString.contains("elevation?latitude=10.0000"))
         XCTAssertTrue(OpenMeteo.forecastURL(Coordinate(lat: 10, lon: 20)).absoluteString.contains("freezing_level_height"))
     }
 
