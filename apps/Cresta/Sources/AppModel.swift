@@ -307,7 +307,8 @@ final class AppModel {
                 if let t = TrackStore.load(o.id) { results.append((o.id, SummitMatcher.match(track: t, index: index, radius: radius))) }
                 if n % 25 == 0 { await MainActor.run { AppModel.shared.importJob?.done = n } }
             }
-            await MainActor.run { AppModel.shared.applyMatches(results) }
+            let final = results
+            await MainActor.run { AppModel.shared.applyMatches(final) }
         }
     }
 
@@ -601,7 +602,7 @@ final class AppModel {
         let before = data.strava.importedCount
         let client = StravaClient(config: StravaCredentials.config, tokens: StravaCredentials.tokens, transport: URLSessionTransport())
         let state = data.strava
-        let bridge = bridge
+        let bridge: StravaBridge = self.bridge
         Task {
             let result = await StravaSync.run(client: client, state: state, delegate: bridge, maxRequests: maxRequests)
             stravaSyncing = false
@@ -639,7 +640,8 @@ final class AppModel {
         guard isLoaded, data.strava.connected, StravaCredentials.config.isComplete, !stravaSyncing else { return }
         stravaSyncing = true
         let client = StravaClient(config: StravaCredentials.config, tokens: StravaCredentials.tokens, transport: URLSessionTransport())
-        let result = await StravaSync.run(client: client, state: data.strava, delegate: bridge, maxRequests: 30)
+        let delegate: StravaBridge = bridge
+        let result = await StravaSync.run(client: client, state: data.strava, delegate: delegate, maxRequests: 30)
         stravaSyncing = false
         updateStravaState(result)
         saveNow()
