@@ -26,21 +26,27 @@ TILES = [
 ]
 
 
+DEADLINE = time.time() + 18 * 60  # keep the CI job short
+
+
 def query(tile):
     s, w, n, e = tile
     q = (f'[out:csv(::id,::lat,::lon,ele,name;false;"\\t")][timeout:180];'
          f'node["natural"="peak"]["name"]({s},{w},{n},{e});out;')
     body = urllib.parse.urlencode({"data": q}).encode()
     last = None
-    for attempt in range(3):
+    for attempt in range(2):
         for ep in ENDPOINTS:
+            if time.time() > DEADLINE:
+                raise RuntimeError(f"tile {tile}: deadline reached")
             try:
                 req = urllib.request.Request(ep, data=body, headers={"User-Agent": "cresta-build/1.0"})
-                with urllib.request.urlopen(req, timeout=240) as r:
+                with urllib.request.urlopen(req, timeout=150) as r:
                     return r.read().decode("utf-8")
             except Exception as ex:  # noqa: BLE001
                 last = ex
-                time.sleep(10 * (attempt + 1))
+                print(f"{ep} {tile}: {ex}", file=sys.stderr)
+                time.sleep(5)
     raise RuntimeError(f"tile {tile} failed: {last}")
 
 

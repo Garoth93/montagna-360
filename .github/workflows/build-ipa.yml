@@ -47,6 +47,7 @@ jobs:
       - name: Download peaks (Overpass API)
         if: steps.cache.outputs.cache-hit != 'true'
         continue-on-error: true
+        timeout-minutes: 20
         run: |
           python3 scripts/fetch_peaks.py peaks.tsv.new && mv peaks.tsv.new peaks.tsv
       - name: Check
