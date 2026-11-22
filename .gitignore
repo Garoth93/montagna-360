@@ -56,3 +56,4 @@ export_*/
 *.geojson
 cresta-backup*.json
 cresta-data*.json
+apps/*/Resources/peaks.tsv

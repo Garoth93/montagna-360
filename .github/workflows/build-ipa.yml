@@ -1,0 +1,147 @@
+name: build-ipa
+
+# Builds every app in apps/ for a real iOS device WITHOUT code signing and
+# uploads an unsigned .ipa as a workflow artifact. The .ipa is then signed
+# on the user's side with Sideloadly / SideStore (free Apple account).
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+
+env:
+  XCODE_VERSION: "26.6"   # pinned; see CLAUDE.md "Xcode e runner"
+
+concurrency:
+  group: build-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.list.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          apps=$(ls -d apps/*/ | xargs -n1 basename | jq -R . | jq -cs .)
+          echo "apps=$apps" >> "$GITHUB_OUTPUT"
+          echo "Apps: $apps"
+
+  # Offline peak database from OpenStreetMap, refreshed monthly (cached).
+  peaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - id: month
+        run: echo "month=$(date +%Y-%m)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: peaks.tsv
+          key: osm-peaks-v1-${{ steps.month.outputs.month }}
+          restore-keys: osm-peaks-v1-
+      - name: Download peaks (Overpass API)
+        if: steps.cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          python3 scripts/fetch_peaks.py peaks.tsv.new && mv peaks.tsv.new peaks.tsv
+      - name: Check
+        run: |
+          mkdir -p out
+          if [ -s peaks.tsv ]; then wc -l peaks.tsv; head -3 peaks.tsv; cp peaks.tsv out/peaks.tsv
+          else echo "::warning::No peak file: the app will offer in-app download only"; touch out/peaks.tsv; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: osm-peaks
+          path: out/peaks.tsv
+          retention-days: 7
+
+  build:
+    needs: [discover, peaks]
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJson(needs.discover.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: osm-peaks
+          path: peaks-download
+
+      - name: Bundle peak database
+        run: |
+          if [ -s peaks-download/peaks.tsv ] && [ -d "apps/${{ matrix.app }}/Resources" ]; then
+            cp peaks-download/peaks.tsv "apps/${{ matrix.app }}/Resources/peaks.tsv"
+            wc -l "apps/${{ matrix.app }}/Resources/peaks.tsv"
+          fi
+
+      - uses: ./.github/actions/setup-xcode
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+          app: ${{ matrix.app }}
+
+      - name: Build for iOS device (unsigned, Release)
+        working-directory: apps/${{ matrix.app }}
+        env:
+          # Optional repository secrets; empty = credentials typed in the app.
+          STRAVA_CLIENT_ID: ${{ secrets.STRAVA_CLIENT_ID }}
+          STRAVA_CLIENT_SECRET: ${{ secrets.STRAVA_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project "${{ matrix.app }}.xcodeproj" \
+            -scheme "${{ matrix.app }}" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            STRAVA_CLIENT_ID="${STRAVA_CLIENT_ID}" \
+            STRAVA_CLIENT_SECRET="${STRAVA_CLIENT_SECRET}" \
+            | tee build/xcodebuild-device.log | xcbeautify --renderer github-actions
+
+      - name: Package unsigned .ipa
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          set -euo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/${{ matrix.app }}.app"
+          test -d "$APP_PATH" || { echo "::error::$APP_PATH not found"; ls -R build/DerivedData/Build/Products; exit 1; }
+          rm -rf build/ipa && mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/
+          PAYLOAD_APP="build/ipa/Payload/${{ matrix.app }}.app"
+          if [ -f "${{ matrix.app }}.entitlements" ]; then
+            codesign --force --sign - --timestamp=none --entitlements "${{ matrix.app }}.entitlements" "$PAYLOAD_APP"
+          fi
+          ls -lh "$PAYLOAD_APP"/peaks.tsv 2>/dev/null || echo "no bundled peaks"
+          (cd build/ipa && zip -qry "../${{ matrix.app }}-unsigned.ipa" Payload)
+          ls -lh "build/${{ matrix.app }}-unsigned.ipa"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist"
+
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-unsigned-ipa
+          path: apps/${{ matrix.app }}/build/${{ matrix.app }}-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload raw xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-device-log-${{ matrix.app }}
+          path: apps/${{ matrix.app }}/build/xcodebuild-device.log
+          if-no-files-found: ignore
+          retention-days: 7

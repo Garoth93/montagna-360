@@ -181,7 +181,7 @@ public enum OutingBuilder {
         let kind: ActivityKind
         if let hint, hint != .walk, hint != .other, hint != .hike || !suggestion.kind.isSnow { kind = hint } else { kind = suggestion.kind }
         let simplified = track?.simplified(tolerance: 3)
-        let preview = (simplified ?? Track(points: [])).thinned(maxPoints: 200).coordinates
+        let preview: [Coordinate] = [] // the map is drawn from the stored track
         let title = (name?.isEmpty == false ? name! : parsed?.name) ?? defaultName(kind: kind, date: startDate, calendar: calendar)
         let outing = Outing(name: title, kind: kind, suggestedKind: suggestion.kind, start: startDate, stats: stats,
                             hasTrack: track?.isEmpty == false, preview: preview, startCoordinate: track?.points.first?.coordinate,
@@ -207,7 +207,7 @@ public enum OutingBuilder {
 
 /// Reads a Strava "Download your data" ZIP: preview, then import with
 /// progress, one activity at a time.
-public final class StravaExportReader {
+public final class StravaExportReader: @unchecked Sendable {
     public let archive: ZipArchive
     public let activities: [StravaExportActivity]
 
