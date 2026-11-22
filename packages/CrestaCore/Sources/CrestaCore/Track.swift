@@ -147,7 +147,9 @@ public struct TrackStats: Codable, Equatable, Sendable {
             guard let t0 = pts[i - 1].time, let t1 = pts[i].time else { continue }
             let dt = t1.timeIntervalSince(t0)
             guard dt > 0 else { continue }
-            let v = pts[i].speed ?? d / dt
+            // Speed from positions only: the device speed field is not
+            // reliable across manufacturers.
+            let v = d / dt
             speeds.append(dt <= 30 ? v : 0)
             // Moving: faster than 0.5 m/s, gaps longer than 5 min are pauses.
             if v > 0.5 && dt < 300 {

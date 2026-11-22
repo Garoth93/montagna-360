@@ -46,7 +46,7 @@ public enum StatsBuilder {
             t.moving += o.stats.moving
             t.maxSpeed = max(t.maxSpeed, o.stats.maxSpeed)
             t.maxElevation = max(t.maxElevation, o.stats.maxElevation ?? 0)
-            t.runs += o.stats.runs
+            if o.kind == .resortSki || o.kind == .snowboard { t.runs += o.stats.runs }
         }
         t.days = days.count
         t.summits = stamps.count

@@ -87,9 +87,10 @@ public enum ActivityKind: String, Codable, CaseIterable, Sendable, Identifiable 
         case "rockclimbing", "arrampicata", "climbing": return .climbing
         case "trailrun", "trailrunning", "corsasusentiero", "corsainmontagna": return .trailRun
         case "run", "corsa", "virtualrun": return .run
-        case "ride", "giroinbici", "bici", "ciclismo", "roadbike", "gravelride", "ebikeride", "virtualride", "velomobile", "pedalata": return .bike
+        case "ride", "giroinbici", "ciclismosustrada", "ciclismosustrada", "bicidacorsa", "bici", "ciclismo", "roadbike", "gravelride", "ebikeride", "virtualride", "velomobile", "pedalata": return .bike
         case "mountainbikeride", "emountainbikeride", "mountainbike", "mtb": return .mtb
         case "walk", "camminata", "passeggiata": return .walk
+        case "workout", "allenamentogenerico", "allenamento": return .other
         default: return nil
         }
     }
@@ -156,7 +157,8 @@ public enum ModeClassifier {
             if s.ascent < 150 && avgKmh > 7 && avgKmh < 25 && s.distance > 5000 {
                 return Suggestion(kind: .nordicSki, confidence: 0.5, reason: "tanta distanza in piano, passo regolare")
             }
-            if avgKmh < 6 && downKmh < 7 {
+            // Snowshoes only in the mountains: a winter walk in town is a walk.
+            if avgKmh < 6 && downKmh < 7 && (s.ascent > 150 || (s.maxElevation ?? 0) > 1000) {
                 return Suggestion(kind: .snowshoe, confidence: hint == .snowshoe ? 0.9 : 0.55, reason: "stagione invernale, andatura lenta anche in discesa")
             }
         }

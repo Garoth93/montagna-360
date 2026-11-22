@@ -140,6 +140,49 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(preview.selection(kinds: [.run], includeOther: false).map(\.activityID), [3])
     }
 
+    func testItalianStravaCSV() {
+        // Italian export: typographic apostrophes, "Nome del file", comma decimals,
+        // repeated columns (second = meters / seconds).
+        let csv = "ID attività,Data dell\u{2019}attività,Nome attività,Tipo attività,Descrizione dell\u{2019}attività,Tempo trascorso,Distanza,Frequenza cardiaca massima,Sforzo relativo,Tragitto pendolare,Nota privata sulle attività,Attrezzatura attività,Nome del file,Peso dell\u{2019}atleta,Peso della bici,Tempo trascorso,Tempo in movimento,Distanza,Velocità massima,Velocità media,Dislivello positivo,Dislivello negativo\n"
+            + "900,\"15 gen 2025, 09:00:00\",Uscita test,Sci alpino,,3646,\"10,24\",153.0,41,false,,,activities/900.fit.gz,,,3646.0,3563.0,10243.4,19.84,2.875,18.0,1500.0\n"
+            + "901,\"3 mag 2025, 18:05:00\",Seconda,Allenamento generico,,1800,\"0,0\",,,false,,,activities/901.fit.gz,,,1800.0,1800.0,,,,,\n"
+        let a = StravaCSV.activities(csv)
+        XCTAssertEqual(a.count, 2)
+        XCTAssertEqual(a[0].date, ISOTime.parse("2025-01-15T09:00:00Z"))
+        XCTAssertEqual(a[0].fileName, "activities/900.fit.gz")
+        XCTAssertEqual(a[0].kind, .resortSki)
+        XCTAssertEqual(a[0].distance!, 10_243.4, accuracy: 0.01)
+        XCTAssertEqual(a[0].moving, 3563)
+        XCTAssertEqual(a[0].ascent, 18)
+        XCTAssertEqual(a[0].descent, 1500)
+        XCTAssertEqual(a[0].maxSpeed, 19.84)
+        XCTAssertEqual(a[1].kind, .other)
+        XCTAssertEqual(a[1].date, ISOTime.parse("2025-05-03T18:05:00Z"))
+    }
+
+    func testDateFormats() {
+        let expected = ISOTime.parse("2025-12-01T21:13:11Z")
+        for s in ["Dec 1, 2025, 9:13:11 PM", "Dec 1, 2025, 9:13:11\u{202F}PM", "1 dic 2025, 21:13:11", "1 dicembre 2025, 21:13:11",
+                  "01/12/2025, 21:13:11", "2025-12-01 21:13:11"] {
+            XCTAssertEqual(StravaCSV.date(s), expected, s)
+        }
+    }
+
+    func testSourceNumbersWinOverTrack() {
+        // Device numbers (barometric, lifts excluded) are preferred.
+        let parsed = ParsedTrack(track: Synthetic.resort(), sport: "AlpineSki")
+        let fb = TrackStats(distance: 4000, ascent: 0, descent: 1500, elapsed: 3600, moving: 2400, maxSpeed: 20)
+        let o = OutingBuilder.build(parsed: parsed, name: "x", sport: nil, start: nil, source: .stravaExport, fallback: fb)!.outing
+        XCTAssertEqual(o.stats.distance, 4000)
+        XCTAssertEqual(o.stats.descent, 1500)
+        XCTAssertEqual(o.stats.maxSpeed, 20)
+        XCTAssertGreaterThan(o.stats.ascent, 0) // from the track: the source had none
+        XCTAssertGreaterThanOrEqual(o.stats.runs, 3)
+        // No GPS: the source type is kept, never guessed.
+        let empty = OutingBuilder.build(parsed: nil, name: nil, sport: "Workout", start: Synthetic.t0, source: .stravaExport, fallback: fb)!.outing
+        XCTAssertEqual(empty.kind, .other)
+    }
+
     func testDuplicateDetectorByTimeAndDistance() {
         let o = Outing(name: "x", kind: .hike, start: Synthetic.t0, stats: TrackStats(distance: 10_000), hasTrack: false, source: .file)
         XCTAssertTrue(DuplicateDetector.isDuplicate(stravaID: nil, start: Synthetic.t0.addingTimeInterval(60), distance: 10_400, in: [o]))
