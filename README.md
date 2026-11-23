@@ -5,8 +5,8 @@ in montagna, d'inverno e d'estate: diario delle uscite, album delle cime,
 statistiche di stagione e strumenti per decidere e prepararsi. Offline-first:
 i dati restano sul telefono, nessun server e nessun account.
 
-Sviluppata senza Mac: compilata da GitHub Actions e installata sull'iPhone con
-Sideloadly da Windows (account Apple gratuito).
+Sviluppata senza Mac: compilata da GitHub Actions e distribuita con
+**TestFlight**; il `.ipa` per Sideloadly resta come ripiego.
 
 [![build-ipa](https://github.com/Garoth93/montagna-360/actions/workflows/build-ipa.yml/badge.svg)](https://github.com/Garoth93/montagna-360/actions/workflows/build-ipa.yml)
 [![test-linux](https://github.com/Garoth93/montagna-360/actions/workflows/test-linux.yml/badge.svg)](https://github.com/Garoth93/montagna-360/actions/workflows/test-linux.yml)
@@ -46,7 +46,13 @@ Sideloadly da Windows (account Apple gratuito).
 - **Sci Garage** — sci, scarponi, pelli: giorni d'uso dall'ultima affilatura,
   sciolinatura o manutenzione, con avvisi.
 
-## Installare l'app sull'iPhone (da Windows)
+## Installare l'app sull'iPhone
+
+**TestFlight (consigliato)**: il workflow `testflight` firma e carica l'app a
+ogni modifica (e da solo ogni ~60 giorni, prima che la build scada dopo 90).
+Sull'iPhone basta l'app TestFlight.
+
+**Ripiego Sideloadly (da Windows)**:
 
 1. Pagina **Actions** della repo › workflow **build-ipa** › ultimo run verde
    (o **Run workflow**) › artifact `Cresta-unsigned-ipa`: estrai

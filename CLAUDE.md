@@ -2,10 +2,12 @@
 
 App iOS **nativa (Swift + SwiftUI)** sviluppata senza Mac: il codice viene
 scritto su Linux (Claude Code) e compilato **solo** su GitHub Actions con
-runner macOS. Non va su App Store: l'utente scarica il `.ipa` non firmato
-dagli artifact e lo firma con Sideloadly da Windows.
+runner macOS. Non va su App Store: l'app arriva sull'iPhone con **TestFlight**
+(account Apple a pagamento, firma automatica in CI, `testflight.yml`); il
+`.ipa` non firmato per Sideloadly (`build-ipa.yml`) resta come ripiego.
 
-Stessa impostazione delle repo `Garoth93/ritorni-IOS`,
+Stessa impostazione delle repo `Garoth93/tessere-IOS` (TestFlight, backup
+iCloud: procedure riusabili descritte nel suo CLAUDE.md), `Garoth93/ritorni-IOS`,
 `Garoth93/diario-sonoro-IOS`, `Garoth93/memory-analyzer-IOS`.
 
 ## Vincoli fissi
@@ -26,7 +28,9 @@ Stessa impostazione delle repo `Garoth93/ritorni-IOS`,
   `tracks/`, foto in `photos/`). Rete solo per: Open-Meteo, bollettini
   valanghe (EAWS CAAML + pagina di ripiego), Overpass (download vette),
   Strava.
-- Account Apple gratuito: nessuna firma in CI (`CODE_SIGNING_ALLOWED=NO`).
+- Firma solo in `testflight.yml` (automatica, chiave API App Store Connect).
+  Mai certificati, profili o `.p8` nella repo; Team ID solo nei secrets.
+  `build-ipa.yml` compila senza firma (`CODE_SIGNING_ALLOWED=NO`).
 - Non modificare impostazioni della repo o secrets: spiegare all'utente cosa
   configurare.
 
@@ -84,6 +88,27 @@ scelto dall'utente).
 | `build-simulator.yml` | push, PR, manuale | build per Simulator, mostra gli errori di compilazione |
 | `build-ipa.yml` | push su `main`/`claude/**`, manuale | scarica le vette OSM (cache mensile), build Release senza firma, `.ipa` come artifact (30 giorni) |
 | `test-linux.yml` | push, PR, manuale | `swift test` dei package |
+| `testflight.yml` | manuale, push su `main`/`claude/**` (solo `apps/`, `packages/`), ogni ~60 giorni (1° dei mesi dispari, sul branch di default) | archive firmato + export App Store + upload su TestFlight |
+
+### TestFlight
+
+Procedura identica a `Garoth93/tessere-IOS` (vedi il suo CLAUDE.md):
+
+- secrets della repo: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` (chiave API
+  App Store Connect, ruolo Admin), `APPLE_TEAM_ID`; facoltativi
+  `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET`;
+- App ID `com.garoth93.cresta` e scheda App Store Connect creati a mano; i
+  profili li crea `xcodebuild -allowProvisioningUpdates`. App Group e
+  container iCloud vanno spuntati a mano sull'App ID (l'API non può);
+- `project.yml` con firma vuota (la imposta il workflow da riga di comando),
+  `SystemCapabilities` sul target, `UIRequiresFullScreen: true` (solo
+  verticale, errore 90474), icona 1024 senza trasparenza;
+- build number = `github.run_number`; `MARKETING_VERSION` si alza a mano;
+- step "App ID capabilities" (`scripts/asc_bundle_ids.py`) stampa capability
+  e profili; il certificato di sviluppo creato sul runner viene revocato
+  (`scripts/asc_revoke_certs.py`). Log nell'artifact `testflight-logs`;
+- le build TestFlight scadono dopo 90 giorni: la schedulazione le rinnova;
+- l'archivio vette OSM viene preso dalla cache di `build-ipa.yml`.
 
 ## Regole di lavoro (per Claude)
 
