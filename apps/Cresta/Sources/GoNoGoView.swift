@@ -186,6 +186,7 @@ struct GoTargetDetailView: View {
                 ForEach(WebcamRating.allCases, id: \.self) { rating in
                     Chip(title: rating.title, selected: model.webcamRatings[t.id] == rating) {
                         model.webcamRatings[t.id] = model.webcamRatings[t.id] == rating ? nil : rating
+                        model.scheduleWidgetUpdate()
                     }
                 }
             }

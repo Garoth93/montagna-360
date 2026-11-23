@@ -1,5 +1,6 @@
 import SwiftUI
 import BackgroundTasks
+import WidgetKit
 import CrestaCore
 
 enum AppTab: Hashable {
@@ -100,6 +101,8 @@ final class AppModel {
     private(set) var stravaSyncing = false
     private(set) var weatherBackfillRunning = false
     var tab: AppTab = .home
+    /// Navigation of the Strumenti tab (the widget opens Go/No-Go there).
+    var toolsPath = NavigationPath()
     var toast: Toast?
     var errorMessage: String?
     var importJob: ImportJob?
@@ -116,6 +119,7 @@ final class AppModel {
     @ObservationIgnored private var cancelRequested = false
     @ObservationIgnored private var weatherTried = Set<UUID>()
     @ObservationIgnored private var resumeTask: Task<Void, Never>?
+    @ObservationIgnored private var widgetTask: Task<Void, Never>?
     @ObservationIgnored private var bridge: StravaBridge!
 
     static let syncTaskID = "com.garoth93.cresta.sync"
@@ -152,6 +156,7 @@ final class AppModel {
         upgradeExistingData()
         if isActive { becameActive() }
         Task { await CloudBackupService.shared.offerRestoreIfNeeded() }
+        scheduleWidgetUpdate()
     }
 
     /// Once per new database: stamps passes on stored tracks and names the
@@ -170,6 +175,40 @@ final class AppModel {
         data.revision = revision
         scheduleSave()
         CloudBackupService.shared.schedule()
+        scheduleWidgetUpdate()
+    }
+
+    // MARK: - Widget
+
+    /// Shares the place shown in "Oggi" with the Go/No-Go widget (debounced).
+    func scheduleWidgetUpdate() {
+        widgetTask?.cancel()
+        widgetTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            publishWidget()
+        }
+    }
+
+    func publishWidget() {
+        guard isLoaded else { return }
+        let t = data.goTargets.first
+        let cache = t.flatMap { goCache[$0.id] }
+        let snap = GoWidgetSnapshot(target: t, forecast: cache?.forecast, avalanche: cache?.avalanche, fetchedAt: cache?.fetchedAt,
+                                    factors: data.settings.goFactors, winter: seasonKind == .winter, seed: seedColor,
+                                    webcam: t.flatMap { webcamRatings[$0.id] })
+        Task.detached(priority: .utility) {
+            if SharedStore.saveGo(snap) { WidgetCenter.shared.reloadTimelines(ofKind: "GoNoGo") }
+        }
+    }
+
+    func handle(url: URL) {
+        guard url.scheme == "cresta" else { return }
+        if url.host == "go" {
+            tab = .tools
+            toolsPath = NavigationPath()
+            toolsPath.append(Tool.goNoGo)
+        }
     }
 
     private func scheduleSave() {
@@ -838,6 +877,7 @@ final class AppModel {
         let old = goCache[t.id]
         goCache[t.id] = GoCache(forecast: f ?? old?.forecast, avalanche: a ?? old?.avalanche, fetchedAt: f != nil ? Date() : (old?.fetchedAt ?? Date()))
         if f == nil { show("Offline: uso gli ultimi dati salvati", icon: "wifi.slash", style: .info) }
+        if t.id == data.goTargets.first?.id { scheduleWidgetUpdate() }
         let cache = goCache
         Task.detached { try? JSONFileStore<[UUID: GoCache]>(url: AppFiles.weatherCache).save(cache) }
     }

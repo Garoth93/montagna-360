@@ -29,6 +29,7 @@ struct CrestaApp: App {
             ThemedRoot()
                 .environment(model)
                 .environment(cloud)
+                .onOpenURL { model.handle(url: $0) }
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

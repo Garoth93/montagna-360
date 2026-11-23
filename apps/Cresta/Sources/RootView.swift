@@ -20,7 +20,7 @@ struct RootView: View {
                 NavigationStack { PeaksView() }
             }
             Tab("Strumenti", systemImage: "square.grid.2x2.fill", value: AppTab.tools) {
-                NavigationStack { ToolsView() }
+                NavigationStack(path: $model.toolsPath) { ToolsView() }
             }
             Tab("Impostazioni", systemImage: "gearshape.fill", value: AppTab.settings) {
                 NavigationStack { SettingsView() }

@@ -52,6 +52,8 @@ Sviluppata senza Mac: compilata da GitHub Actions e distribuita con
   webcam (valutazione a vista), giorni dall'ultima nevicata, neve al suolo
   e neve fresca degli ultimi 3 giorni. Ogni fattore si
   attiva/disattiva; i dati scaricati restano disponibili offline.
+- **Widget Go/No-Go** (Home e schermata di blocco): il punteggio della meta
+  mostrata in Oggi, aggiornato anche ad app chiusa; tocco per aprire Go/No-Go.
 - **Zaino** — checklist con modelli (scialpinismo, sci in pista, ciaspole,
   escursione, ferrata, corsa lunga) duplicabili e modificabili; le spunte si
   azzerano a ogni nuova uscita.
@@ -75,7 +77,8 @@ Sull'iPhone basta l'app TestFlight.
    **Start**. Sull'iPhone: Impostazioni › Generali › VPN e gestione
    dispositivo › Autorizza (serve la Modalità sviluppatore attiva).
 3. Con l'account gratuito la firma dura 7 giorni: rifirma lo stesso `.ipa`, i
-   dati restano. Con Sideloadly il backup iCloud non è disponibile: prima di
+   dati restano. App + widget usano 2 identificativi dell'account gratuito.
+   Con Sideloadly il backup iCloud non è disponibile: prima di
    reinstallare da zero usa Impostazioni › Esporta backup.
 
 ## Backup
@@ -114,7 +117,9 @@ mappa delle Cime. Dati © OpenStreetMap contributors, licenza ODbL.
 
 ```
 apps/Cresta/              app SwiftUI (project.yml per XcodeGen)
-  Sources/                schermate, modello, servizi (rete, file, notifiche, portachiavi)
+  Sources/                schermate, modello, servizi (rete, file, notifiche, portachiavi, backup iCloud)
+  Shared/                 tema e dati condivisi con il widget (App Group)
+  Widgets/                widget Go/No-Go (WidgetKit)
   Resources/              icona, colori; peaks.tsv aggiunto in CI
 packages/CrestaCore/      logica non grafica, testata con `swift test` anche su Linux
 scripts/fetch_peaks.py    download delle vette OSM (CI)

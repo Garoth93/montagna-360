@@ -39,7 +39,12 @@ iCloud: procedure riusabili descritte nel suo CLAUDE.md), `Garoth93/ritorni-IOS`
 
 | App    | Package logica | Bundle ID              | Deployment target |
 |--------|----------------|------------------------|-------------------|
-| Cresta | CrestaCore     | `com.garoth93.cresta`  | iOS 26.0 |
+| Cresta | CrestaCore     | `com.garoth93.cresta` (+ `.widgets`) | iOS 26.0 |
+
+App Group `group.com.garoth93.cresta` (app + widget), container iCloud
+`iCloud.com.garoth93.backup` (solo app). Entrambi creati e spuntati a mano su
+developer.apple.com sugli App ID `com.garoth93.cresta` e
+`com.garoth93.cresta.widgets` (l'API App Store Connect non può assegnarli).
 
 Package `CrestaCore` (Foundation only, testato su Linux):
 
@@ -78,6 +83,16 @@ Package `CrestaCore` (Foundation only, testato su Linux):
   `StravaSync` (stato persistente con coda `pending`: riprende dove si era
   fermata). Rete dietro `HTTPTransport` (fake nei test).
 
+Widget (`apps/Cresta/Widgets`, estensione `CrestaWidgets`): Go/No-Go della
+meta mostrata in Oggi (small, medium, schermata di blocco). L'app scrive
+`GoWidgetSnapshot` (meta, previsioni e bollettino in cache, fattori attivi)
+nel file `go-widget.json` dell'App Group (`Shared/SharedStore.swift`, gruppo
+reale letto da `embedded.mobileprovision` con `ProvisioningProfile`); il
+widget ricalcola il punteggio (`GoDayWindow`: oggi 8–16, domani dopo le 15)
+e aggiorna da solo previsioni e bollettino se hanno più di 3 ore. Tocco →
+`cresta://go` (apre Go/No-Go). `Shared/` (tema e store) è compilato in
+entrambi i target.
+
 App (`apps/Cresta/Sources`): `AppModel` (`@Observable @MainActor`, salvataggio
 differito con `DataWriter`), `Services.swift` (file, Keychain, rete,
 notifiche), una vista per modulo. Tab: Oggi, Diario, Cime, Strumenti,
@@ -90,9 +105,10 @@ Stessa procedura di `Garoth93/tessere-IOS`: container **condiviso**
 `iCloud.com.garoth93.backup`, sottocartella `Cresta` (in File: *iCloud Drive ›
 Backup › Cresta*).
 
-- `Cresta.entitlements` (container + `CloudDocuments`), usato da
-  `testflight.yml`; `Cresta.sideload.entitlements` senza iCloud, preferito da
-  `build-ipa.yml` (l'account gratuito non ha iCloud). `project.yml`:
+- `Cresta.entitlements` (App Group + container + `CloudDocuments`), usato da
+  `testflight.yml`; `Cresta.sideload.entitlements` solo App Group, senza
+  iCloud, preferito da `build-ipa.yml` (l'account gratuito non ha iCloud);
+  `Widgets.entitlements` solo App Group (mai iCloud nel widget). `project.yml`:
   `SystemCapabilities` `com.apple.iCloud`, `NSUbiquitousContainers` con
   `NSUbiquitousContainerName: Backup`.
 - Sull'App ID `com.garoth93.cresta` (developer.apple.com) va spuntato a mano
@@ -147,8 +163,9 @@ Procedura identica a `Garoth93/tessere-IOS` (vedi il suo CLAUDE.md):
   `SystemCapabilities` sul target, `UIRequiresFullScreen: true` (solo
   verticale, errore 90474), icona 1024 senza trasparenza;
 - build number = `github.run_number`; `MARKETING_VERSION` si alza a mano;
-- step "App ID capabilities" (`scripts/asc_bundle_ids.py`) stampa capability
-  e profili; il certificato di sviluppo creato sul runner viene revocato
+- step "App ID capabilities" (`scripts/asc_bundle_ids.py --delete-stale
+  --group group.com.garoth93.cresta`) stampa capability e profili di app e
+  widget ed elimina i profili senza l'App Group (Xcode li ricrea); il certificato di sviluppo creato sul runner viene revocato
   (`scripts/asc_revoke_certs.py`). Log nell'artifact `testflight-logs`;
 - le build TestFlight scadono dopo 90 giorni: la schedulazione le rinnova;
 - gli archivi OSM (vette, passi, comprensori) vengono presi dalla cache di
