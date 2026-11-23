@@ -3,10 +3,12 @@ import CrestaCore
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(CloudBackupService.self) private var cloud
     @Environment(\.m3) private var m3
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var cloud = cloud
         TabView(selection: $model.tab) {
             Tab("Oggi", systemImage: model.seasonKind == .winter ? "snowflake" : "sun.max.fill", value: AppTab.home) {
                 NavigationStack { HomeView() }
@@ -38,6 +40,12 @@ struct RootView: View {
                 .presentationDetents([.medium])
                 .presentationCornerRadius(32)
                 .interactiveDismissDisabled(model.importJob?.phase == .running)
+        }
+        .sheet(isPresented: Binding(
+            get: { cloud.offerRestore && model.data.onboardingDone && model.exportSession == nil && model.importJob == nil },
+            set: { if !$0 { cloud.offerRestore = false } }
+        )) {
+            CloudRestoreView(firstLaunch: true).presentationCornerRadius(32)
         }
         .fullScreenCover(isPresented: Binding(
             get: { model.isLoaded && !model.data.onboardingDone },

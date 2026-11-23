@@ -25,7 +25,8 @@ iCloud: procedure riusabili descritte nel suo CLAUDE.md), `Garoth93/ritorni-IOS`
 - Testi dell'app neutri, come un'app pubblica: nessun riferimento a "uso
   personale" o a dati dell'utente.
 - Offline-first: dati in `Application Support` (`cresta-data.json`, tracce in
-  `tracks/`, foto in `photos/`). Rete solo per: Open-Meteo, bollettini
+  `tracks/`, foto in `photos/`). iCloud solo come **backup in iCloud Drive**
+  (niente CloudKit), vedi sotto. Rete solo per: Open-Meteo, bollettini
   valanghe (EAWS CAAML + pagina di ripiego), Overpass (download vette),
   Strava.
 - Firma solo in `testflight.yml` (automatica, chiave API App Store Connect).
@@ -82,6 +83,33 @@ differito con `DataWriter`), `Services.swift` (file, Keychain, rete,
 notifiche), una vista per modulo. Tab: Oggi, Diario, Cime, Strumenti,
 Impostazioni. Tema Material 3 da seme (`Palette.winterSeed`/`summerSeed` o
 scelto dall'utente).
+
+### Backup iCloud Drive
+
+Stessa procedura di `Garoth93/tessere-IOS`: container **condiviso**
+`iCloud.com.garoth93.backup`, sottocartella `Cresta` (in File: *iCloud Drive ›
+Backup › Cresta*).
+
+- `Cresta.entitlements` (container + `CloudDocuments`), usato da
+  `testflight.yml`; `Cresta.sideload.entitlements` senza iCloud, preferito da
+  `build-ipa.yml` (l'account gratuito non ha iCloud). `project.yml`:
+  `SystemCapabilities` `com.apple.iCloud`, `NSUbiquitousContainers` con
+  `NSUbiquitousContainerName: Backup`.
+- Sull'App ID `com.garoth93.cresta` (developer.apple.com) va spuntato a mano
+  il container in iCloud › *Configure*.
+- File: `Cresta-backup-yyyy-MM-dd.json` (uno al giorno, ultimi 30) +
+  `Cresta-backup-latest.json`, `BackupFile` JSON con `version`; tracce in
+  `tracks/<uuid>.json` e foto in `photos/` caricate una volta sola (non
+  cambiano). Logica pura in `CloudBackup.swift` (package), I/O in
+  `CloudBackupService.swift` (`NSFileCoordinator`, container risolto fuori dal
+  main thread, segnaposto `.<nome>.icloud`).
+- **Mai nel backup**: token Strava, client id/secret (restano nel Keychain);
+  lo stato della coda di sincronizzazione viene azzerato.
+- Quando: dopo le modifiche (8 s), all'uscita in background, nel
+  `BGAppRefreshTask` (`com.garoth93.cresta.sync`, insieme a Strava). Un'app
+  vuota non sovrascrive mai i backup.
+- Ripristino: Impostazioni › Ripristina da iCloud (sostituisce i dati, con
+  conferma) e guidato al primo avvio se l'app è vuota (chiesto una volta).
 
 ## Convenzioni di codice
 

@@ -148,6 +148,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var syncSports: Set<ActivityKind> = Set(ActivityKind.allCases)
     /// Bumped when new Go/No-Go factors are added, to switch them on once.
     public var goFactorsVersion = 2
+    /// Automatic backup in iCloud Drive.
+    public var cloudBackup = true
 
     public init() {}
 
@@ -174,6 +176,7 @@ public struct Settings: Codable, Equatable, Sendable {
         let version = (try? c.decode(Int.self, forKey: .goFactorsVersion)) ?? 1
         if version < 2 { goFactors.insert(.snowDepth) }
         goFactorsVersion = d.goFactorsVersion
+        cloudBackup = (try? c.decode(Bool.self, forKey: .cloudBackup)) ?? d.cloudBackup
     }
 }
 

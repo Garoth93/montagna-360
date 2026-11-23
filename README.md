@@ -75,8 +75,16 @@ Sull'iPhone basta l'app TestFlight.
    **Start**. Sull'iPhone: Impostazioni › Generali › VPN e gestione
    dispositivo › Autorizza (serve la Modalità sviluppatore attiva).
 3. Con l'account gratuito la firma dura 7 giorni: rifirma lo stesso `.ipa`, i
-   dati restano. Prima di reinstallare da zero fai un backup (Impostazioni ›
-   Esporta backup).
+   dati restano. Con Sideloadly il backup iCloud non è disponibile: prima di
+   reinstallare da zero usa Impostazioni › Esporta backup.
+
+## Backup
+
+Con TestFlight Cresta salva da sola un backup in **iCloud Drive › Backup ›
+Cresta** (visibile nell'app File): un file al giorno (ultimi 30), con tracce e
+foto, quando i dati cambiano e in background. Le credenziali Strava non
+vengono mai salvate. Su un iPhone nuovo, se l'app è vuota, propone da sola il
+ripristino; altrimenti Impostazioni › Ripristina da iCloud.
 
 ## Collegare Strava
 

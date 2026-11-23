@@ -151,6 +151,7 @@ final class AppModel {
         bundledCounts = loaded.bundled
         upgradeExistingData()
         if isActive { becameActive() }
+        Task { await CloudBackupService.shared.offerRestoreIfNeeded() }
     }
 
     /// Once per new database: stamps passes on stored tracks and names the
@@ -168,6 +169,7 @@ final class AppModel {
         revision += 1
         data.revision = revision
         scheduleSave()
+        CloudBackupService.shared.schedule()
     }
 
     private func scheduleSave() {
@@ -194,7 +196,15 @@ final class AppModel {
 
     func setActive(_ active: Bool) {
         isActive = active
-        if active { becameActive() } else { saveNow(); scheduleBackgroundSync() }
+        if active {
+            becameActive()
+        } else {
+            saveNow()
+            if data.settings.cloudBackup {
+                BackgroundWork.run("cresta-icloud-backup") { await CloudBackupService.shared.backup(force: false) }
+            }
+            scheduleBackgroundSync()
+        }
     }
 
     private func becameActive() {
@@ -669,24 +679,43 @@ final class AppModel {
         scheduleBackgroundSync()
     }
 
+    /// Background refresh: Strava sync (if connected) and iCloud backup.
     func scheduleBackgroundSync() {
-        guard data.strava.connected else { return }
+        guard data.strava.connected || data.settings.cloudBackup else { return }
         let req = BGAppRefreshTaskRequest(identifier: Self.syncTaskID)
-        req.earliestBeginDate = data.strava.rate.waitUntil() ?? Date().addingTimeInterval(4 * 3600)
+        req.earliestBeginDate = (data.strava.connected ? data.strava.rate.waitUntil() : nil) ?? Date().addingTimeInterval(4 * 3600)
         try? BGTaskScheduler.shared.submit(req)
     }
 
-    /// Background refresh: a few requests, then reschedule.
+    /// Background refresh: a few Strava requests, the iCloud backup, then reschedule.
     func runBackgroundSync() async {
-        guard isLoaded, data.strava.connected, StravaCredentials.config.isComplete, !stravaSyncing else { return }
-        stravaSyncing = true
-        let client = StravaClient(config: StravaCredentials.config, tokens: StravaCredentials.tokens, transport: URLSessionTransport())
-        let delegate: StravaBridge = bridge
-        let result = await StravaSync.run(client: client, state: data.strava, delegate: delegate, maxRequests: 30)
-        stravaSyncing = false
-        updateStravaState(result)
-        saveNow()
+        guard isLoaded else { return }
+        if data.strava.connected, StravaCredentials.config.isComplete, !stravaSyncing {
+            stravaSyncing = true
+            let client = StravaClient(config: StravaCredentials.config, tokens: StravaCredentials.tokens, transport: URLSessionTransport())
+            let delegate: StravaBridge = bridge
+            let result = await StravaSync.run(client: client, state: data.strava, delegate: delegate, maxRequests: 30)
+            stravaSyncing = false
+            updateStravaState(result)
+            saveNow()
+        }
+        await CloudBackupService.shared.backup(force: false)
         scheduleBackgroundSync()
+    }
+
+    /// Replaces the data with an iCloud backup (tracks/photos already copied).
+    func restore(_ file: BackupFile) {
+        var restored = file.data
+        restored.onboardingDone = true
+        // Tokens are not in backups: connected only if this phone still has them.
+        restored.strava.connected = restored.strava.connected && StravaCredentials.tokens != nil
+        for o in restored.outings where o.hasTrack && !FileManager.default.fileExists(atPath: TrackStore.url(o.id).path) {
+            // Track not downloaded: keep the numbers, drop the map.
+            if let i = restored.outings.firstIndex(where: { $0.id == o.id }) { restored.outings[i].hasTrack = false }
+        }
+        mutate { $0 = restored }
+        peakIndex = PeakIndex(peaks: peakIndex.peaks + restored.userPeaks)
+        show("Backup ripristinato: \(restored.outings.count) uscite", icon: "icloud.and.arrow.down.fill")
     }
 
     // MARK: - Backpacks

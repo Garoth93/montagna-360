@@ -4,6 +4,8 @@ import CrestaCore
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(CloudBackupService.self) private var cloud
+    @State private var showCloudRestore = false
     @Environment(\.m3) private var m3
     @State private var backup: DataFileDocument?
     @State private var pickRestore = false
@@ -92,6 +94,23 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("Backup automatico su iCloud Drive", isOn: binding(\.cloudBackup))
+                LabeledContent("Ultimo backup", value: cloud.lastBackupAt.map { "\(Format.dayMonthYear($0)), \(Format.time($0))" } ?? "mai")
+                Button {
+                    Task { await cloud.backup(force: true) }
+                } label: {
+                    HStack { Label("Esegui backup ora", systemImage: "icloud.and.arrow.up"); if cloud.isWorking { Spacer(); ProgressView() } }
+                }
+                .disabled(cloud.isWorking)
+                Button { showCloudRestore = true } label: { Label("Ripristina da iCloud", systemImage: "icloud.and.arrow.down") }
+                if let e = cloud.lastError { Text(e).font(.footnote).foregroundStyle(m3.error) }
+            } header: { Text("Backup iCloud") } footer: {
+                Text(cloud.available == false
+                     ? "iCloud Drive non disponibile: serve l'accesso a iCloud con iCloud Drive attivo (con l'installazione da Sideloadly il backup iCloud non è disponibile)."
+                     : "In File › iCloud Drive › Backup › Cresta: un file al giorno (ultimi 30) più l'ultimo, con tracce e foto. Le credenziali Strava non vengono mai salvate.")
+            }
+
+            Section {
                 Button {
                     makingBackup = true
                     Task { backup = DataFileDocument(data: await model.makeBackup()); makingBackup = false }
@@ -100,8 +119,8 @@ struct SettingsView: View {
                 }
                 Button { pickRestore = true } label: { Label("Ripristina backup", systemImage: "arrow.counterclockwise") }
                 Button(role: .destructive) { confirmDelete = true } label: { Label("Elimina tutti i dati", systemImage: "trash") }
-            } header: { Text("Dati") } footer: {
-                Text("Tutto resta sul telefono. Il backup contiene uscite, tracce, cime, zaini e garage (le foto no).")
+            } header: { Text("Backup su file") } footer: {
+                Text("Esporta un archivio ZIP con uscite, tracce, cime, zaini e garage (le foto no) da salvare dove vuoi.")
             }
 
             Section("Informazioni") {
@@ -120,9 +139,10 @@ struct SettingsView: View {
         .fileImporter(isPresented: $pickRestore, allowedContentTypes: [.zip, .data]) { result in
             if case .success(let url) = result { Task { await model.restoreBackup(from: url) } }
         }
+        .sheet(isPresented: $showCloudRestore) { CloudRestoreView(firstLaunch: false).presentationCornerRadius(32) }
         .confirmationDialog("Eliminare tutti i dati?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Elimina tutto", role: .destructive) { model.deleteAllData() }
-        } message: { Text("Uscite, tracce, foto, cime e impostazioni verranno cancellate. Fai prima un backup.") }
+        } message: { Text("Uscite, tracce, foto, cime e impostazioni verranno cancellate da questo iPhone. I backup su iCloud restano.") }
     }
 
     private func binding<T>(_ kp: WritableKeyPath<CrestaCore.Settings, T>) -> Binding<T> {

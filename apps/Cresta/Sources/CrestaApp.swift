@@ -21,12 +21,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct CrestaApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var model = AppModel.shared
+    @State private var cloud = CloudBackupService.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             ThemedRoot()
                 .environment(model)
+                .environment(cloud)
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
