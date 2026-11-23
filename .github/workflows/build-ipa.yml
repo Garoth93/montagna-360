@@ -33,7 +33,7 @@ jobs:
   # Offline OSM databases (peaks, passes, ski areas), refreshed monthly (cached).
   peaks:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - id: month
@@ -49,7 +49,7 @@ jobs:
         if: steps.cache-peaks.outputs.cache-hit != 'true'
         continue-on-error: true
         timeout-minutes: 20
-        run: python3 scripts/fetch_peaks.py peaks.tsv.new peaks && mv peaks.tsv.new peaks.tsv
+        run: python3 scripts/fetch_peaks.py peaks.tsv peaks
 
       - uses: actions/cache@v4
         id: cache-passes
@@ -60,8 +60,8 @@ jobs:
       - name: Download passes (Overpass API)
         if: steps.cache-passes.outputs.cache-hit != 'true'
         continue-on-error: true
-        timeout-minutes: 12
-        run: python3 scripts/fetch_peaks.py passes.tsv.new passes && mv passes.tsv.new passes.tsv
+        timeout-minutes: 20
+        run: python3 scripts/fetch_peaks.py passes.tsv passes
 
       - uses: actions/cache@v4
         id: cache-skiareas
@@ -72,14 +72,17 @@ jobs:
       - name: Download ski areas (Overpass API)
         if: steps.cache-skiareas.outputs.cache-hit != 'true'
         continue-on-error: true
-        timeout-minutes: 12
-        run: python3 scripts/fetch_peaks.py skiareas.tsv.new skiareas && mv skiareas.tsv.new skiareas.tsv
+        timeout-minutes: 20
+        run: python3 scripts/fetch_peaks.py skiareas.tsv skiareas
 
       - name: Check
         run: |
           mkdir -p out
           for f in peaks passes skiareas; do
+            # Complete file (cached) or, after a timeout, the partial one (not cached:
+            # the next run tries again).
             if [ -s "$f.tsv" ]; then wc -l "$f.tsv"; cp "$f.tsv" "out/$f.tsv"
+            elif [ -s "$f.tsv.partial" ]; then echo "::warning::$f.tsv parziale"; wc -l "$f.tsv.partial"; cp "$f.tsv.partial" "out/$f.tsv"
             else echo "::warning::$f.tsv mancante: l'app proporrà il download dalla mappa"; touch "out/$f.tsv"; fi
           done
       - uses: actions/upload-artifact@v4

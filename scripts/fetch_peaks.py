@@ -19,6 +19,8 @@ import urllib.request
 
 ENDPOINTS = [
     "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 ]
 # (south, west, north, east) tiles; small enough for Overpass timeouts.
@@ -55,7 +57,7 @@ def query(tile):
                 raise RuntimeError(f"tile {tile}: deadline reached")
             try:
                 req = urllib.request.Request(ep, data=body, headers={"User-Agent": "cresta-build/1.0"})
-                with urllib.request.urlopen(req, timeout=150) as r:
+                with urllib.request.urlopen(req, timeout=75) as r:
                     return r.read().decode("utf-8")
             except Exception as ex:  # noqa: BLE001
                 last = ex
@@ -64,7 +66,15 @@ def query(tile):
     raise RuntimeError(f"tile {tile} failed: {last}")
 
 
+def write(path, rows):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(rows[k] for k in sorted(rows, key=int)) + "\n")
+
+
 def main(out_path):
+    """Writes <out>.partial after every tile (so a CI timeout still leaves
+    data to bundle) and <out> only when every tile succeeded (only complete
+    files are cached by the workflow)."""
     rows = {}
     failed = 0
     for t in TILES:
@@ -81,13 +91,17 @@ def main(out_path):
                 oid = int(f[1]) + {"node": 0, "way": 10**12, "relation": 2 * 10**12}.get(f[0], 0)
                 rows[str(oid)] = "\t".join([str(oid)] + [x.replace("\n", " ").strip() for x in f[2:]])
         print(f"tile {t}: total {len(rows)}", file=sys.stderr)
+        if rows:
+            write(out_path + ".partial", rows)
         time.sleep(2)
     if not rows:
-        print("no peaks downloaded", file=sys.stderr)
+        print("nothing downloaded", file=sys.stderr)
         return 1
-    with open(out_path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(rows[k] for k in sorted(rows, key=int)) + "\n")
-    print(f"wrote {len(rows)} peaks ({failed} tiles failed)", file=sys.stderr)
+    if failed:
+        print(f"partial: {len(rows)} places, {failed} tiles failed", file=sys.stderr)
+        return 1
+    write(out_path, rows)
+    print(f"wrote {len(rows)} places", file=sys.stderr)
     return 0
 
 
