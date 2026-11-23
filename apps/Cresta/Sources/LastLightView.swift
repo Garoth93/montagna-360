@@ -13,7 +13,14 @@ struct LastLightView: View {
     @State private var mode: SummitMode = .foot
     @State private var showPicker = false
     @State private var useLearned = true
+    @State private var useHistory = true
     @State private var notified = false
+
+    /// Your own times on this summit, if you have climbed it with a track.
+    private var history: LastLight.History? {
+        guard let peak else { return nil }
+        return LastLight.history(peakID: peak.id, mode: mode, stamps: model.data.stamps, outings: model.data.outings)
+    }
 
     private var pace: LastLight.Pace {
         guard useLearned else { return .default(for: mode) }
@@ -23,6 +30,10 @@ struct LastLightView: View {
 
     private var plan: LastLightPlan? {
         guard let peak else { return nil }
+        if useHistory, let h = history {
+            return LastLight.plan(peak: peak, departure: departure, ascent: h.ascent, descent: h.descent,
+                                  safetyMargin: model.data.settings.lastLightMargin * 60)
+        }
         return LastLight.plan(peak: peak, departure: departure, startElevation: startElevation, distanceKm: distanceKm, mode: mode, pace: pace,
                               safetyMargin: model.data.settings.lastLightMargin * 60)
     }
@@ -44,6 +55,19 @@ struct LastLightView: View {
             }
             .buttonStyle(PressableStyle())
 
+            if let h = history {
+                M3Card(color: m3.tertiaryContainer) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Ci sei già stato", systemImage: "clock.arrow.circlepath").font(.m3TitleMedium)
+                        Text("L'ultima volta (\(Format.dayMonthYear(h.date)), \(h.mode.title.lowercased())): salita in \(Format.duration(h.ascent)), rientro in \(Format.duration(h.descent)).")
+                            .font(.m3BodyMedium)
+                        if h.count > 1 { Text("\(h.count) salite con traccia").font(.m3LabelMedium).opacity(0.8) }
+                        Toggle("Usa i tuoi tempi su questa vetta", isOn: $useHistory).font(.m3BodyMedium)
+                    }
+                    .foregroundStyle(m3.onTertiaryContainer)
+                }
+            }
+
             M3Card {
                 VStack(spacing: 12) {
                     DatePicker("Partenza", selection: $departure).font(.m3BodyLarge)
@@ -54,11 +78,13 @@ struct LastLightView: View {
                             ForEach(SummitMode.allCases) { Label($0.title, systemImage: $0.icon).tag($0) }
                         }
                     }
-                    Stepper("Quota di partenza: \(Int(startElevation)) m", value: $startElevation, in: 0...4000, step: 50)
-                    Stepper("Distanza fino in vetta: \(Format.number(distanceKm, decimals: 1)) km", value: $distanceKm, in: 0.5...40, step: 0.5)
-                    Toggle("Usa il tuo passo dalle uscite passate", isOn: $useLearned)
-                    Text("Salita \(Int(pace.upRate)) m/h · discesa \(Int(pace.downRate)) m/h")
-                        .font(.m3LabelMedium).foregroundStyle(m3.onSurfaceVariant).frame(maxWidth: .infinity, alignment: .leading)
+                    if !(useHistory && history != nil) {
+                        Stepper("Quota di partenza: \(Int(startElevation)) m", value: $startElevation, in: 0...4000, step: 50)
+                        Stepper("Distanza fino in vetta: \(Format.number(distanceKm, decimals: 1)) km", value: $distanceKm, in: 0.5...40, step: 0.5)
+                        Toggle("Usa il tuo passo dalle uscite passate", isOn: $useLearned)
+                        Text("Salita \(Int(pace.upRate)) m/h · discesa \(Int(pace.downRate)) m/h")
+                            .font(.m3LabelMedium).foregroundStyle(m3.onSurfaceVariant).frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
 
@@ -120,7 +146,7 @@ struct LastLightView: View {
         if notified {
             Button("Annulla avviso") { model.cancelLastLight(); notified = false }.frame(maxWidth: .infinity)
         }
-        Text("Stime basate su passo medio e margine di sicurezza di \(Int(model.data.settings.lastLightMargin)) minuti. Valuta sempre le condizioni reali.")
+        Text((useHistory && history != nil ? "Tempi presi dalla tua ultima salita" : "Stime basate su passo medio") + " e margine di sicurezza di \(Int(model.data.settings.lastLightMargin)) minuti. Valuta sempre le condizioni reali.")
             .font(.m3BodySmall).foregroundStyle(m3.onSurfaceVariant)
     }
 }

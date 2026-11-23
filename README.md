@@ -21,9 +21,19 @@ Sviluppata senza Mac: compilata da GitHub Actions e distribuita con
   distanza, dislivello ±, tempo in movimento e totale, velocità massima, quota
   massima, discese (sci in pista), meteo, note, foto, attrezzatura usata,
   esportazione GPX. Filtri per stagione e attività, ricerca, uscite a mano.
+- **Montagna e allenamento**: Oggi, Statistiche e riepilogo contano solo le
+  uscite in montagna (neve, escursioni, trail, ferrate; corse, bici e
+  camminate solo con dislivello vero, sopra i 1200 m o su una cima/passo).
+  Il Diario le mostra tutte, con il filtro "Solo montagna".
+- **Giornate di sci** come Slopes: ogni discesa (dislivello, distanza, velocità
+  massima), tempo sugli sci, sugli impianti e in pausa; sulla mappa piste e
+  impianti con colori diversi; il **comprensorio** viene riconosciuto da
+  OpenStreetMap.
 - **Statistiche** di stagione (giorni, metri, record, giorni per mese, per
-  attività) e **riepilogo dell'anno** a schede animate.
-- **Cime** — album delle vette (OpenStreetMap, offline). Ogni cima raggiunta
+  attività, per comprensorio), **mappa di calore** di tutte le tracce e
+  **riepilogo dell'anno** a schede animate, condivisibile come immagine
+  (singola scheda o poster riassuntivo).
+- **Cime e passi** — album delle vette e dei passi (OpenStreetMap, offline). Ogni cima raggiunta
   ha il suo timbro con data, quota, meteo e modalità (a piedi / sci / ciaspole /
   bici): proposta da traccia e velocità, correggibile a mano. Le tracce
   importate vengono abbinate da sole alle vette vicine. Mappa di tutte le
@@ -35,16 +45,20 @@ Sviluppata senza Mac: compilata da GitHub Actions e distribuita con
   i limiti di richieste e riprende da sola.
 - **Ultima Luce** — da vetta e ora di partenza: tramonto, buio (fine del
   crepuscolo civile), ora limite per scendere, rientro previsto, con notifica.
-  Il passo può essere imparato dalle uscite passate.
+  Se sei già salito su quella vetta con una traccia usa i tuoi tempi reali,
+  altrimenti il passo imparato dalle uscite passate.
 - **Go/No-Go** — punteggio 0–10 da bollettino valanghe (EAWS CAAML; ripiego
   sulla lettura della pagina web), meteo e vento (Open-Meteo), zero termico,
-  webcam (valutazione a vista), giorni dall'ultima nevicata. Ogni fattore si
+  webcam (valutazione a vista), giorni dall'ultima nevicata, neve al suolo
+  e neve fresca degli ultimi 3 giorni. Ogni fattore si
   attiva/disattiva; i dati scaricati restano disponibili offline.
 - **Zaino** — checklist con modelli (scialpinismo, sci in pista, ciaspole,
   escursione, ferrata, corsa lunga) duplicabili e modificabili; le spunte si
   azzerano a ogni nuova uscita.
-- **Sci Garage** — sci, scarponi, pelli: giorni d'uso dall'ultima affilatura,
-  sciolinatura o manutenzione, con avvisi.
+- **Garage** — sci, scarponi, pelli (giorni d'uso dall'ultima affilatura,
+  sciolinatura o manutenzione), scarpe e bici (km dall'ultimo cambio, catena,
+  tagliando), con avvisi. L'attrezzatura indicata su Strava viene aggiunta da
+  sola.
 
 ## Installare l'app sull'iPhone
 
@@ -78,11 +92,13 @@ Sull'iPhone basta l'app TestFlight.
 3. Strumenti › Importa › **Collega Strava**. Dopo l'import dell'archivio la
    sincronizzazione parte dall'ultima attività già presente.
 
-## Vette offline
+## Vette, passi e comprensori offline
 
-Il workflow `build-ipa` scarica a ogni mese le vette con nome
-(`natural=peak`) di Alpi e Appennini dall'API Overpass di OpenStreetMap
-(`scripts/fetch_peaks.py`) e le include nel pacchetto (`peaks.tsv`). Se il
+Il workflow `build-ipa` scarica a ogni mese da OpenStreetMap (API Overpass,
+`scripts/fetch_peaks.py`) le vette (`natural=peak`), i passi
+(`mountain_pass=yes`) e i comprensori sciistici (`landuse=winter_sports`) con
+nome di Alpi e Appennini e li include nel pacchetto (`peaks.tsv`,
+`passes.tsv`, `skiareas.tsv`). Se il
 download non riesce l'app funziona lo stesso e le zone si scaricano dalla
 mappa delle Cime. Dati © OpenStreetMap contributors, licenza ODbL.
 
@@ -98,9 +114,7 @@ scripts/fetch_peaks.py    download delle vette OSM (CI)
 CLAUDE.md                 convenzioni e regole di lavoro per Claude Code
 ```
 
-## Seconda fase: registrazione GPS
+## Sincronizzazione Strava
 
-L'architettura è pronta: tutte le fonti (archivio, file, Strava) producono un
-`Track` e passano da `OutingBuilder`. La registrazione dal telefono
-implementerà il protocollo `TrackRecorder` (`CrestaCore/Recording.swift`, con
-`LiveStats` per i numeri in diretta) e salverà l'uscita con lo stesso percorso.
+In Impostazioni › Sport da sincronizzare scegli quali attività scaricare
+(es. "Solo montagna e neve" per lasciare fuori corse e bici in piano).

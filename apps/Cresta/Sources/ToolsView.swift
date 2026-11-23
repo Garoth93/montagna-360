@@ -2,7 +2,7 @@ import SwiftUI
 import CrestaCore
 
 enum Tool: String, Hashable, CaseIterable, Identifiable {
-    case lastLight, goNoGo, backpack, garage, importHub, stats, wrapped
+    case lastLight, goNoGo, backpack, garage, importHub, stats, wrapped, heatmap
 
     var id: String { rawValue }
 
@@ -11,10 +11,11 @@ enum Tool: String, Hashable, CaseIterable, Identifiable {
         case .lastLight: return "Ultima Luce"
         case .goNoGo: return "Go/No-Go"
         case .backpack: return "Zaino"
-        case .garage: return "Sci Garage"
+        case .garage: return "Garage"
         case .importHub: return "Importa"
         case .stats: return "Statistiche"
         case .wrapped: return "Riepilogo dell'anno"
+        case .heatmap: return "Mappa di calore"
         }
     }
 
@@ -23,10 +24,11 @@ enum Tool: String, Hashable, CaseIterable, Identifiable {
         case .lastLight: return "Tramonto, buio e ora limite per rientrare"
         case .goNoGo: return "Valanghe, meteo, vento: si parte?"
         case .backpack: return "Checklist per ogni tipo di uscita"
-        case .garage: return "Affilatura e sciolina sotto controllo"
+        case .garage: return "Sci, scarpe e bici: manutenzione e km"
         case .importHub: return "Archivio Strava, file GPX/FIT/TCX, sincronizzazione"
         case .stats: return "Numeri di stagione"
         case .wrapped: return "Il tuo anno in montagna"
+        case .heatmap: return "Tutte le tue tracce su una mappa"
         }
     }
 
@@ -39,6 +41,7 @@ enum Tool: String, Hashable, CaseIterable, Identifiable {
         case .importHub: return "square.and.arrow.down.fill"
         case .stats: return "chart.bar.fill"
         case .wrapped: return "sparkles"
+        case .heatmap: return "flame.fill"
         }
     }
 
@@ -51,6 +54,7 @@ enum Tool: String, Hashable, CaseIterable, Identifiable {
         case .importHub: return "#fc4c02"
         case .stats: return "#00838f"
         case .wrapped: return "#6a1b9a"
+        case .heatmap: return "#d84315"
         }
     }
 
@@ -63,6 +67,7 @@ enum Tool: String, Hashable, CaseIterable, Identifiable {
         case .importHub: ImportHubView()
         case .stats: StatsView()
         case .wrapped: WrappedView()
+        case .heatmap: HeatmapView()
         }
     }
 }
@@ -72,8 +77,8 @@ struct ToolsView: View {
 
     private var tools: [Tool] {
         model.seasonKind == .winter
-            ? [.goNoGo, .garage, .backpack, .lastLight, .stats, .importHub, .wrapped]
-            : [.lastLight, .backpack, .goNoGo, .stats, .garage, .importHub, .wrapped]
+            ? [.goNoGo, .garage, .backpack, .lastLight, .stats, .heatmap, .importHub, .wrapped]
+            : [.lastLight, .backpack, .goNoGo, .stats, .heatmap, .garage, .importHub, .wrapped]
     }
 
     var body: some View {

@@ -76,7 +76,7 @@ final class ParsingTests: XCTestCase {
     func testStravaCSV() {
         let csv = """
         Activity ID,Activity Date,Activity Name,Activity Type,Activity Description,Elapsed Time,Distance,Max Heart Rate,Relative Effort,Commute,Activity Private Note,Activity Gear,Filename,Athlete Weight,Bike Weight,Elapsed Time,Moving Time,Distance,Max Speed,Average Speed,Elevation Gain
-        111,"Jan 15, 2025, 9:00:00 AM",Gita sintetica,Backcountry Ski,"Bella, neve",9000,12.5,,,false,,,activities/111.gpx.gz,,,9000,8000,12500.3,15.2,1.5,1000
+        111,"Jan 15, 2025, 9:00:00 AM",Gita sintetica,Backcountry Ski,"Bella, neve",9000,12.5,,,false,,Sci test,activities/111.gpx.gz,,,9000,8000,12500.3,15.2,1.5,1000
         222,"15 gen 2025, 14:00:00",Seconda,Snowshoe,,3600,"5,2",,,false,,,,,,3600,3000,,2.0,1.4,300
         """
         let a = StravaCSV.activities(csv)
@@ -89,6 +89,7 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(a[0].ascent, 1000)
         XCTAssertEqual(a[0].date, ISOTime.parse("2025-01-15T09:00:00Z"))
         XCTAssertEqual(a[0].fileName, "activities/111.gpx.gz")
+        XCTAssertEqual(a[0].gear, "Sci test")
         XCTAssertEqual(a[1].kind, .snowshoe)
         XCTAssertEqual(a[1].distance!, 5200, accuracy: 0.01)
         XCTAssertEqual(a[1].date, ISOTime.parse("2025-01-15T14:00:00Z"))
@@ -157,6 +158,7 @@ final class ParsingTests: XCTestCase {
         XCTAssertEqual(a[0].descent, 1500)
         XCTAssertEqual(a[0].maxSpeed, 19.84)
         XCTAssertEqual(a[1].kind, .other)
+        XCTAssertEqual(a[0].gear, "")
         XCTAssertEqual(a[1].date, ISOTime.parse("2025-05-03T18:05:00Z"))
     }
 

@@ -68,7 +68,7 @@ public enum WMOCode {
 
 /// Builds Open-Meteo URLs and parses its JSON. No key needed.
 public enum OpenMeteo {
-    static let hourlyVars = "temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,freezing_level_height,cloud_cover,precipitation,snowfall"
+    static let hourlyVars = "temperature_2m,weather_code,wind_speed_10m,wind_gusts_10m,freezing_level_height,cloud_cover,precipitation,snowfall,snow_depth"
 
     /// Forecast for the next days plus `pastDays` of history (for the last snowfall).
     public static func forecastURL(_ c: Coordinate, pastDays: Int = 30, elevation: Double? = nil) -> URL {
@@ -110,6 +110,7 @@ public enum OpenMeteo {
         public var cloud_cover: [Double?]?
         public var precipitation: [Double?]?
         public var snowfall: [Double?]?
+        public var snow_depth: [Double?]?
     }
 
     public struct Daily: Decodable, Sendable {
@@ -183,6 +184,18 @@ public enum OpenMeteo {
         public var precipitation: Double
         public var worstCode: Int?
         public var meanCloudCover: Double?
+        /// Snow on the ground (m), deepest value in the window.
+        public var snowDepth: Double?
+        /// Snowfall (cm) in the 72 hours before the window.
+        public var freshSnow72h: Double = 0
+
+        public init(maxWind: Double? = nil, maxGusts: Double? = nil, minFreezingLevel: Double? = nil, maxFreezingLevel: Double? = nil,
+                    precipitation: Double = 0, worstCode: Int? = nil, meanCloudCover: Double? = nil, snowDepth: Double? = nil,
+                    freshSnow72h: Double = 0) {
+            self.maxWind = maxWind; self.maxGusts = maxGusts; self.minFreezingLevel = minFreezingLevel
+            self.maxFreezingLevel = maxFreezingLevel; self.precipitation = precipitation; self.worstCode = worstCode
+            self.meanCloudCover = meanCloudCover; self.snowDepth = snowDepth; self.freshSnow72h = freshSnow72h
+        }
     }
 
     public static func window(_ r: Response, from: Date, to: Date) -> WindowSummary {
@@ -191,8 +204,11 @@ public enum OpenMeteo {
         let off = r.utc_offset_seconds ?? 0
         var clouds: [Double] = []
         for (i, s) in h.time.enumerated() {
-            guard let d = Self.date(s, offset: off), d >= from.addingTimeInterval(-1800), d <= to.addingTimeInterval(1800) else { continue }
+            guard let d = Self.date(s, offset: off) else { continue }
             func v<T>(_ a: [T?]?) -> T? { a.flatMap { i < $0.count ? $0[i] : nil } }
+            if d < from, d >= from.addingTimeInterval(-72 * 3600), let x = v(h.snowfall) { w.freshSnow72h += x }
+            guard d >= from.addingTimeInterval(-1800), d <= to.addingTimeInterval(1800) else { continue }
+            if let x = v(h.snow_depth) { w.snowDepth = max(w.snowDepth ?? 0, x) }
             if let x = v(h.wind_speed_10m) { w.maxWind = max(w.maxWind ?? 0, x) }
             if let x = v(h.wind_gusts_10m) { w.maxGusts = max(w.maxGusts ?? 0, x) }
             if let x = v(h.freezing_level_height) {

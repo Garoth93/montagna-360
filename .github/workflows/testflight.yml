@@ -43,17 +43,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore OSM peak database (cache of build-ipa.yml)
+      - name: Restore OSM peaks (cache of build-ipa.yml)
         uses: actions/cache/restore@v4
         with:
           path: peaks.tsv
           key: osm-peaks-v1-none
           restore-keys: osm-peaks-v1-
+      - name: Restore OSM passes
+        uses: actions/cache/restore@v4
+        with:
+          path: passes.tsv
+          key: osm-passes-v1-none
+          restore-keys: osm-passes-v1-
+      - name: Restore OSM ski areas
+        uses: actions/cache/restore@v4
+        with:
+          path: skiareas.tsv
+          key: osm-skiareas-v1-none
+          restore-keys: osm-skiareas-v1-
 
-      - name: Bundle peak database
+      - name: Bundle OSM databases
         run: |
-          if [ -s peaks.tsv ]; then cp peaks.tsv "apps/${APP}/Resources/peaks.tsv"; wc -l peaks.tsv
-          else echo "::warning::Nessun archivio vette in cache: l'app proporrà il download dalla mappa"; fi
+          for f in peaks passes skiareas; do
+            if [ -s "$f.tsv" ]; then cp "$f.tsv" "apps/${APP}/Resources/$f.tsv"; wc -l "$f.tsv"
+            else echo "::warning::$f.tsv non in cache: l'app proporrà il download dalla mappa"; fi
+          done
 
       - uses: ./.github/actions/setup-xcode
         with:

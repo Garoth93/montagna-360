@@ -1,20 +1,69 @@
 import Foundation
 
-/// A summit from OpenStreetMap (`natural=peak` with a name).
+/// Kind of place in the offline OpenStreetMap database.
+public enum PeakKind: String, Codable, CaseIterable, Sendable {
+    /// `natural=peak`
+    case peak
+    /// `mountain_pass=yes` (road and trail passes)
+    case pass
+    /// `landuse=winter_sports` (ski areas), centre point
+    case skiArea
+
+    public var title: String {
+        switch self {
+        case .peak: return "Cima"
+        case .pass: return "Passo"
+        case .skiArea: return "Comprensorio"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .peak: return "mountain.2.fill"
+        case .pass: return "road.lanes.curved.right"
+        case .skiArea: return "figure.skiing.downhill"
+        }
+    }
+
+    /// Bundled file name (without extension).
+    public var fileName: String {
+        switch self {
+        case .peak: return "peaks"
+        case .pass: return "passes"
+        case .skiArea: return "skiareas"
+        }
+    }
+}
+
+/// A summit or pass from OpenStreetMap (with a name).
 public struct Peak: Codable, Equatable, Hashable, Sendable, Identifiable {
-    /// OSM node id (`osm:123`) or `user:<uuid>` for peaks added by hand.
+    /// OSM id (`osm:123`) or `user:<uuid>` for places added by hand.
     public var id: String
     public var name: String
     public var lat: Double
     public var lon: Double
     public var elevation: Double?
+    public var kind: PeakKind
 
-    public init(id: String, name: String, lat: Double, lon: Double, elevation: Double?) {
+    public init(id: String, name: String, lat: Double, lon: Double, elevation: Double?, kind: PeakKind = .peak) {
         self.id = id
         self.name = name
         self.lat = lat
         self.lon = lon
         self.elevation = elevation
+        self.kind = kind
+    }
+
+    enum CodingKeys: String, CodingKey { case id, name, lat, lon, elevation, kind }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        lat = try c.decode(Double.self, forKey: .lat)
+        lon = try c.decode(Double.self, forKey: .lon)
+        elevation = try c.decodeIfPresent(Double.self, forKey: .elevation)
+        kind = (try? c.decodeIfPresent(PeakKind.self, forKey: .kind)) ?? .peak
     }
 
     public var coordinate: Coordinate { Coordinate(lat: lat, lon: lon) }
@@ -23,7 +72,7 @@ public struct Peak: Codable, Equatable, Hashable, Sendable, Identifiable {
 /// The bundled offline file: one peak per line, tab separated:
 /// `osmId \t lat \t lon \t ele \t name` (ele may be empty).
 public enum PeakFile {
-    public static func parse(_ text: String) -> [Peak] {
+    public static func parse(_ text: String, kind: PeakKind = .peak) -> [Peak] {
         var out: [Peak] = []
         out.reserveCapacity(text.utf8.count / 40)
         for line in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
@@ -31,7 +80,7 @@ public enum PeakFile {
             guard f.count == 5, let lat = Double(f[1]), let lon = Double(f[2]) else { continue }
             let name = f[4].trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { continue }
-            out.append(Peak(id: "osm:\(f[0])", name: name, lat: lat, lon: lon, elevation: parseElevation(String(f[3]))))
+            out.append(Peak(id: "osm:\(f[0])", name: name, lat: lat, lon: lon, elevation: parseElevation(String(f[3])), kind: kind))
         }
         return out
     }
@@ -61,9 +110,16 @@ public enum PeakFile {
         }.joined(separator: "\n")
     }
 
-    /// Overpass API query for named peaks in a box (in-app area download).
-    public static func overpassQuery(_ box: BoundingBox) -> String {
-        "[out:csv(::id,::lat,::lon,ele,name;false;\"\\t\")][timeout:90];node[\"natural\"=\"peak\"][\"name\"](\(box.minLat),\(box.minLon),\(box.maxLat),\(box.maxLon));out;"
+    /// Overpass API query for named places of a kind in a box (in-app area
+    /// download). Ski areas are polygons: their centre is used.
+    public static func overpassQuery(_ box: BoundingBox, kind: PeakKind = .peak) -> String {
+        let b = "(\(box.minLat),\(box.minLon),\(box.maxLat),\(box.maxLon))"
+        let head = "[out:csv(::id,::lat,::lon,ele,name;false;\"\\t\")][timeout:90];"
+        switch kind {
+        case .peak: return head + "node[\"natural\"=\"peak\"][\"name\"]\(b);out;"
+        case .pass: return head + "node[\"mountain_pass\"=\"yes\"][\"name\"]\(b);out;"
+        case .skiArea: return head + "(way[\"landuse\"=\"winter_sports\"][\"name\"]\(b);relation[\"landuse\"=\"winter_sports\"][\"name\"]\(b););out center;"
+        }
     }
 }
 
@@ -71,6 +127,7 @@ public enum PeakFile {
 public struct PeakIndex: Sendable {
     public let peaks: [Peak]
     private let cells: [Int64: [Int32]]
+    private let byID: [String: Int32]
     private static let cell = 0.05
 
     public init(peaks: [Peak]) {
@@ -79,8 +136,13 @@ public struct PeakIndex: Sendable {
         let unique = peaks.filter { seen.insert($0.id).inserted }
         self.peaks = unique
         var c: [Int64: [Int32]] = [:]
-        for (i, p) in unique.enumerated() { c[Self.key(p.lat, p.lon), default: []].append(Int32(i)) }
+        var ids: [String: Int32] = [:]
+        for (i, p) in unique.enumerated() {
+            c[Self.key(p.lat, p.lon), default: []].append(Int32(i))
+            ids[p.id] = Int32(i)
+        }
         cells = c
+        byID = ids
     }
 
     static func key(_ lat: Double, _ lon: Double) -> Int64 {
@@ -90,7 +152,9 @@ public struct PeakIndex: Sendable {
 
     public var count: Int { peaks.count }
 
-    public func peak(id: String) -> Peak? { peaks.first { $0.id == id } }
+    public func peak(id: String) -> Peak? { byID[id].map { peaks[Int($0)] } }
+
+    public func count(of kind: PeakKind) -> Int { peaks.reduce(0) { $1.kind == kind ? $0 + 1 : $0 } }
 
     public func peaks(in box: BoundingBox, limit: Int = .max) -> [Peak] {
         var out: [Peak] = []
@@ -123,11 +187,11 @@ public struct PeakIndex: Sendable {
             .sorted { $0.1 < $1.1 }
     }
 
-    public func search(_ query: String, limit: Int = 50) -> [Peak] {
+    public func search(_ query: String, limit: Int = 50, kind: PeakKind? = nil) -> [Peak] {
         let q = Search.fold(query)
         guard !q.isEmpty else { return [] }
         var prefix: [Peak] = [], contains: [Peak] = []
-        for p in peaks {
+        for p in peaks where kind == nil || p.kind == kind {
             let n = Search.fold(p.name)
             if n.hasPrefix(q) { prefix.append(p) } else if n.contains(q) { contains.append(p) }
             if prefix.count >= limit { break }
@@ -178,5 +242,15 @@ public enum SummitMatcher {
             }
         }
         return best.values.sorted { ($0.time ?? .distantPast) < ($1.time ?? .distantPast) }
+    }
+}
+
+/// Names ski days after the nearest ski area (OSM `landuse=winter_sports`).
+public enum SkiAreaNamer {
+    /// The ski area closest to the track's highest point, within `radius`.
+    public static func name(for track: Track, areas: PeakIndex, radius: Double = 8000) -> String? {
+        guard let top = track.points.max(by: { ($0.ele ?? -1) < ($1.ele ?? -1) }) ?? track.points.first else { return nil }
+        let candidates = [top.coordinate, track.boundingBox?.center].compactMap { $0 }
+        return candidates.lazy.compactMap { areas.nearest(to: $0, within: radius).first?.peak.name }.first
     }
 }

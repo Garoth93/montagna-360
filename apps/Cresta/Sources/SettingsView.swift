@@ -45,12 +45,23 @@ struct SettingsView: View {
             } footer: { Text("In automatico è inverno dal 15 novembre al 30 aprile.") }
 
             Section {
-                Toggle("Timbra le cime in automatico", isOn: binding(\.autoMatchSummits))
+                Toggle("Solo uscite in montagna", isOn: binding(\.mountainOnly))
+                if s.mountainOnly {
+                    Stepper("Corse e bici contano da \(Int(s.mountainMinAscent)) m di dislivello", value: binding(\.mountainMinAscent), in: 100...1500, step: 50)
+                }
+            } header: { Text("Montagna e allenamento") } footer: {
+                Text("Oggi, Statistiche e riepilogo dell'anno contano neve, escursioni, trail e ferrate; corse, bici e camminate solo se salgono abbastanza, superano i 1200 m o toccano una cima o un passo. Il Diario le mostra tutte.")
+            }
+
+            Section {
+                Toggle("Timbra cime e passi in automatico", isOn: binding(\.autoMatchSummits))
                 Stepper("Distanza dalla vetta: \(Int(s.summitRadius)) m", value: binding(\.summitRadius), in: 20...200, step: 10)
                 Button("Ricontrolla tutte le tracce") { model.rematchAllSummits() }
+                LabeledContent("Passi nell'archivio offline", value: Format.number(Double(model.peakIndex.count(of: .pass))))
+                LabeledContent("Comprensori sciistici", value: Format.number(Double(model.skiAreaIndex.count)))
                 Toggle("Scarica il meteo storico delle uscite", isOn: binding(\.fetchWeatherForImports))
                 LabeledContent("Vette nell'archivio offline", value: Format.number(Double(model.peakIndex.count)))
-            } header: { Text("Cime") } footer: {
+            } header: { Text("Cime e passi") } footer: {
                 Text(model.bundledPeakCount > 0
                      ? "Dati © OpenStreetMap contributors (ODbL). Altre zone si scaricano dalla mappa delle Cime."
                      : "Nessun archivio di vette incluso nell'app: scarica le zone che ti interessano dalla mappa delle Cime. Dati © OpenStreetMap contributors (ODbL).")
@@ -75,6 +86,9 @@ struct SettingsView: View {
             Section("Importa e sincronizza") {
                 NavigationLink { ImportHubView() } label: { Label("Importa da Strava o da file", systemImage: "square.and.arrow.down") }
                 NavigationLink { StravaSettingsView() } label: { Label("Credenziali API Strava", systemImage: "key.fill") }
+                NavigationLink { SyncSportsView() } label: {
+                    LabeledContent("Sport da sincronizzare", value: s.syncSports.count == ActivityKind.allCases.count ? "Tutti" : "\(s.syncSports.count)")
+                }
             }
 
             Section {
@@ -113,5 +127,31 @@ struct SettingsView: View {
 
     private func binding<T>(_ kp: WritableKeyPath<CrestaCore.Settings, T>) -> Binding<T> {
         Binding(get: { model.data.settings[keyPath: kp] }, set: { v in model.mutate { $0.settings[keyPath: kp] = v } })
+    }
+}
+
+/// Sports the Strava sync downloads (the others are skipped).
+struct SyncSportsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(ActivityKind.allCases) { k in
+                    Toggle(isOn: Binding(get: { model.data.settings.syncSports.contains(k) }, set: { on in
+                        model.mutate { d in if on { d.settings.syncSports.insert(k) } else { d.settings.syncSports.remove(k) } }
+                    })) { Label(k.title, systemImage: k.icon) }
+                }
+            } footer: {
+                Text("Le attività escluse non vengono scaricate da Strava. Quelle già nel diario restano.")
+            }
+            Section {
+                Button("Solo montagna e neve") {
+                    model.mutate { $0.settings.syncSports = Set(ActivityKind.allCases.filter { ![.run, .bike, .walk, .other].contains($0) }) }
+                }
+                Button("Tutti") { model.mutate { $0.settings.syncSports = Set(ActivityKind.allCases) } }
+            }
+        }
+        .navigationTitle("Sport da sincronizzare")
     }
 }

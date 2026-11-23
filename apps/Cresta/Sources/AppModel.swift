@@ -76,9 +76,11 @@ final class StravaBridge: StravaSyncDelegate, @unchecked Sendable {
         let fallback = TrackStats(distance: s.distance ?? 0, ascent: s.total_elevation_gain ?? 0, elapsed: s.elapsed_time ?? 0,
                                   moving: s.moving_time ?? 0, maxSpeed: s.max_speed ?? 0)
         guard let m = model else { return false }
-        let (gear, index) = await MainActor.run { (m.data.gear, m.peakIndex) }
+        let (gear, index, areas, sports) = await MainActor.run { (m.data.gear, m.peakIndex, m.skiAreaIndex, m.data.settings.syncSports) }
+        // Sports excluded from the sync are skipped (not imported).
+        if let k = ActivityKind.fromStrava(s.sport), !sports.contains(k) { return false }
         guard let built = OutingBuilder.build(parsed: parsed, name: s.name, sport: s.sport, start: s.startDate, source: .stravaAPI,
-                                              stravaID: s.id, fallback: fallback, gear: gear) else { return false }
+                                              stravaID: s.id, fallback: fallback, gear: gear, skiAreas: areas) else { return false }
         let matches = built.track.map { SummitMatcher.match(track: $0, index: index) } ?? []
         return await MainActor.run { m.ingest(built.outing, track: built.track, matches: matches) }
     }
@@ -92,7 +94,9 @@ final class AppModel {
     private(set) var data = AppData()
     private(set) var isLoaded = false
     private(set) var peakIndex = PeakIndex(peaks: [])
-    private(set) var bundledPeakCount = 0
+    private(set) var skiAreaIndex = PeakIndex(peaks: [])
+    private(set) var bundledCounts: [PeakKind: Int] = [:]
+    var bundledPeakCount: Int { bundledCounts[.peak] ?? 0 }
     private(set) var stravaSyncing = false
     private(set) var weatherBackfillRunning = false
     var tab: AppTab = .home
@@ -141,10 +145,22 @@ final class AppModel {
         if let cache = try? JSONFileStore<[UUID: GoCache]>(url: AppFiles.weatherCache).load() { goCache = cache }
         revision = data.revision
         isLoaded = true
-        let loadedPeaks = await Task.detached(priority: .utility) { PeakDatabase.load() }.value
-        peakIndex = PeakIndex(peaks: loadedPeaks.peaks + data.userPeaks)
-        bundledPeakCount = loadedPeaks.bundled
+        let loaded = await Task.detached(priority: .utility) { PeakDatabase.load() }.value
+        peakIndex = PeakIndex(peaks: loaded.places + data.userPeaks)
+        skiAreaIndex = PeakIndex(peaks: loaded.skiAreas)
+        bundledCounts = loaded.bundled
+        upgradeExistingData()
         if isActive { becameActive() }
+    }
+
+    /// Once per new database: stamps passes on stored tracks and names the
+    /// ski areas of resort days imported before these features existed.
+    private func upgradeExistingData() {
+        let key = "upgrade.passes-areas.v1"
+        guard !UserDefaults.standard.bool(forKey: key), data.outings.contains(where: \.hasTrack),
+              peakIndex.count(of: .pass) > 0 || skiAreaIndex.count > 0 else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        rematchAllSummits(silent: true)
     }
 
     func mutate(_ change: (inout AppData) -> Void) {
@@ -297,27 +313,34 @@ final class AppModel {
     }
 
     /// Re-runs the automatic summit matching on all stored tracks.
-    func rematchAllSummits() {
+    func rematchAllSummits(silent: Bool = false) {
         let outings = data.outings.filter(\.hasTrack)
         let index = peakIndex
+        let areas = skiAreaIndex
         let radius = data.settings.summitRadius
-        importJob = ImportJob(title: "Abbinamento vette", total: outings.count, status: "Cerco le cime lungo le tracce…")
-        Task.detached(priority: .userInitiated) {
-            var results: [(UUID, [SummitMatcher.Match])] = []
+        if !silent {
+            importJob = ImportJob(title: "Abbinamento cime e passi", total: outings.count, status: "Cerco cime, passi e comprensori lungo le tracce…")
+        }
+        Task.detached(priority: silent ? .utility : .userInitiated) {
+            var results: [(UUID, [SummitMatcher.Match], String?)] = []
             for (n, o) in outings.enumerated() {
-                if let t = TrackStore.load(o.id) { results.append((o.id, SummitMatcher.match(track: t, index: index, radius: radius))) }
-                if n % 25 == 0 { await MainActor.run { AppModel.shared.importJob?.done = n } }
+                if let t = TrackStore.load(o.id) {
+                    let area = (o.kind == .resortSki || o.kind == .snowboard) ? SkiAreaNamer.name(for: t, areas: areas) : nil
+                    results.append((o.id, SummitMatcher.match(track: t, index: index, radius: radius), area))
+                }
+                if !silent, n % 25 == 0 { await MainActor.run { AppModel.shared.importJob?.done = n } }
             }
             let final = results
-            await MainActor.run { AppModel.shared.applyMatches(final) }
+            await MainActor.run { AppModel.shared.applyMatches(final, silent: silent) }
         }
     }
 
-    private func applyMatches(_ results: [(UUID, [SummitMatcher.Match])]) {
+    private func applyMatches(_ results: [(UUID, [SummitMatcher.Match], String?)], silent: Bool = false) {
         var added = 0
         mutate { d in
-            for (oid, matches) in results {
+            for (oid, matches, area) in results {
                 guard let oi = d.outings.firstIndex(where: { $0.id == oid }) else { continue }
+                if let area, d.outings[oi].area == nil { d.outings[oi].area = area }
                 for m in matches {
                     if d.stamps.contains(where: { $0.outingID == oid && $0.peakID == m.peakID }) { continue }
                     guard let peak = peakIndex.peak(id: m.peakID) else { continue }
@@ -328,10 +351,14 @@ final class AppModel {
                 }
             }
         }
-        importJob?.done = importJob?.total ?? 0
-        importJob?.summits = added
-        importJob?.phase = .finished
-        importJob?.status = added == 0 ? "Nessuna nuova cima trovata." : "Trovate \(added) nuove cime."
+        if silent {
+            if added > 0 { show("Trovati \(added) nuovi timbri tra cime e passi", icon: "flag.fill") }
+        } else {
+            importJob?.done = importJob?.total ?? 0
+            importJob?.summits = added
+            importJob?.phase = .finished
+            importJob?.status = added == 0 ? "Nessuna nuova cima o passo trovato." : "Trovati \(added) nuovi timbri."
+        }
         backfillWeather()
     }
 
@@ -374,14 +401,24 @@ final class AppModel {
             .sorted { ($0.stamps.first?.date ?? .distantPast) > ($1.stamps.first?.date ?? .distantPast) }
     }
 
+    /// Downloads peaks, passes and ski areas of a zone for offline use.
     func downloadPeaks(in box: BoundingBox) async {
-        do {
-            let peaks = try await OverpassService.peaks(in: box)
-            await Task.detached { PeakDatabase.appendDownloaded(peaks) }.value
-            peakIndex = PeakIndex(peaks: peakIndex.peaks + peaks)
-            show("Scaricate \(peaks.count) vette per l'uso offline", icon: "arrow.down.circle.fill")
-        } catch {
+        var places: [Peak] = []
+        var areas: [Peak] = []
+        var failed = false
+        for kind in PeakKind.allCases {
+            do {
+                let list = try await OverpassService.places(in: box, kind: kind)
+                await Task.detached { PeakDatabase.appendDownloaded(list, kind: kind) }.value
+                if kind == .skiArea { areas += list } else { places += list }
+            } catch { failed = true }
+        }
+        if !places.isEmpty { peakIndex = PeakIndex(peaks: peakIndex.peaks + places) }
+        if !areas.isEmpty { skiAreaIndex = PeakIndex(peaks: skiAreaIndex.peaks + areas) }
+        if places.isEmpty && areas.isEmpty && failed {
             show("Download non riuscito: riprova più tardi", icon: "wifi.exclamationmark", style: .error)
+        } else {
+            show("Scaricate \(places.count) tra cime e passi per l'uso offline", icon: "arrow.down.circle.fill")
         }
     }
 
@@ -468,6 +505,7 @@ final class AppModel {
         importJob = ImportJob(title: "Import archivio Strava", total: list.count, status: "Importo le attività…")
         let gear = data.gear
         let index = peakIndex
+        let areas = skiAreaIndex
         let radius = data.settings.summitRadius
         Task.detached(priority: .userInitiated) {
             var batch: [(Outing, Track?, [SummitMatcher.Match])] = []
@@ -488,7 +526,7 @@ final class AppModel {
             for (n, a) in list.enumerated() {
                 if await MainActor.run(body: { AppModel.shared.cancelRequested }) { break }
                 autoreleasepool {
-                    if let built = reader.outing(for: a, gear: gear) {
+                    if let built = reader.outing(for: a, gear: gear, skiAreas: areas) {
                         let matches = built.track.map { SummitMatcher.match(track: $0, index: index, radius: radius) } ?? []
                         batch.append((built.outing, built.track, matches))
                     } else {
@@ -510,6 +548,7 @@ final class AppModel {
         job.done = cancelRequested ? job.done : job.total
         job.status = "\(job.imported) importate · \(job.duplicates) già presenti" + (job.failed > 0 ? " · \(job.failed) senza dati" : "")
         importJob = job
+        applySourceGear()
         if exportSession != nil, let reader = exportReader { exportSession?.preview = reader.preview(existing: data.outings) }
         saveNow()
         backfillWeather()
@@ -521,6 +560,7 @@ final class AppModel {
         importJob = ImportJob(title: "Import file", total: urls.count, status: "Leggo i file…")
         let gear = data.gear
         let index = peakIndex
+        let areas = skiAreaIndex
         let radius = data.settings.summitRadius
         Task.detached(priority: .userInitiated) {
             var lastID: UUID?
@@ -529,7 +569,7 @@ final class AppModel {
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                 var result: (Outing, Track?, [SummitMatcher.Match])?
                 if let d = try? Data(contentsOf: url), let parsed = try? TrackFileParser.parse(d, fileName: url.lastPathComponent),
-                   let built = OutingBuilder.build(parsed: parsed, name: nil, sport: nil, start: nil, source: .file, gear: gear) {
+                   let built = OutingBuilder.build(parsed: parsed, name: nil, sport: nil, start: nil, source: .file, gear: gear, skiAreas: areas) {
                     result = (built.outing, built.track, built.track.map { SummitMatcher.match(track: $0, index: index, radius: radius) } ?? [])
                 }
                 let r = result
@@ -707,6 +747,19 @@ final class AppModel {
         show("\(task.title) registrata", icon: task.icon)
     }
 
+    /// Gear named by the source (Strava export) goes into the garage.
+    func applySourceGear() {
+        let r = GarageLogic.gearFromSources(outings: data.outings.filter { $0.sourceGear != nil }, gear: data.gear)
+        guard !r.newItems.isEmpty || !r.assignments.isEmpty else { return }
+        mutate { d in
+            d.gear += r.newItems
+            for i in d.outings.indices {
+                if let g = r.assignments[d.outings[i].id], !d.outings[i].gearIDs.contains(g) { d.outings[i].gearIDs.append(g) }
+            }
+        }
+        if !r.newItems.isEmpty { show("Garage: aggiunte \(r.newItems.count) attrezzature da Strava", icon: "shoe.fill") }
+    }
+
     var garageAlerts: [(item: GearItem, status: MaintenanceStatus)] {
         GarageLogic.alerts(gear: data.gear, outings: data.outings)
     }
@@ -715,7 +768,7 @@ final class AppModel {
         guard data.settings.notificationsEnabled else { return }
         for a in garageAlerts where a.status.isDue {
             Notifier.schedule(id: "garage.\(a.item.id).\(a.status.task.rawValue)", title: "\(a.status.task.title) per \(a.item.name)",
-                              body: "\(a.status.daysUsed) giorni d'uso dall'ultima volta (intervallo \(a.status.interval)).",
+                              body: "\(a.status.used) \(a.status.unitLabel) d'uso dall'ultima volta (intervallo \(a.status.interval)).",
                               at: Date().addingTimeInterval(5))
         }
     }

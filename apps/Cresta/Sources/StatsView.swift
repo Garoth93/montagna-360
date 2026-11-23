@@ -8,9 +8,13 @@ struct StatsView: View {
     @State private var season: Season = Season.of(Date())
 
     var body: some View {
-        let seasons = Array(Set(StatsBuilder.seasons(model.data.outings) + [Season.of(Date())])).sorted(by: >)
-        let st = StatsBuilder.season(season, outings: model.data.outings, stamps: model.data.stamps)
+        let outings = model.data.mountainOutings
+        let seasons = Array(Set(StatsBuilder.seasons(outings) + [Season.of(Date())])).sorted(by: >)
+        let st = StatsBuilder.season(season, outings: outings, stamps: model.data.stamps)
+        let areas = StatsBuilder.areas(outings.filter { $0.season == season })
         ScreenScroll {
+            SegmentedPills(options: [(true, "Solo montagna", "mountain.2.fill"), (false, "Tutto", "figure.run")],
+                           selection: Binding(get: { model.data.settings.mountainOnly }, set: { v in model.mutate { $0.settings.mountainOnly = v } }))
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(seasons) { s in Chip(title: s.title, icon: s.kind == .winter ? "snowflake" : "sun.max", selected: s == season) { season = s } }
@@ -48,6 +52,23 @@ struct StatsView: View {
                             .cornerRadius(8)
                     }
                     .frame(height: 180)
+                }
+            }
+
+            if !areas.isEmpty {
+                SectionTitle("Comprensori")
+                ForEach(areas, id: \.name) { a in
+                    HStack(spacing: 12) {
+                        IconBadge(icon: "figure.skiing.downhill", tones: m3.primaryTones, size: 42)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(a.name).font(.m3TitleSmall).foregroundStyle(m3.onSurface).lineLimit(1)
+                            Text("\(Format.meters(a.descent)) di discesa").font(.m3BodySmall).foregroundStyle(m3.onSurfaceVariant)
+                        }
+                        Spacer()
+                        Text(Format.plural(a.days, "giorno", "giorni")).font(.m3LabelLarge).foregroundStyle(m3.onSurface)
+                    }
+                    .padding(12)
+                    .background(m3.surfaceContainerLow, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
             }
 
@@ -95,6 +116,10 @@ struct StatsView: View {
                     }
                 }
             }
+            NavigationLink(value: Tool.heatmap) {
+                Label("Mappa di calore", systemImage: "flame.fill").frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.bordered)
             NavigationLink(value: Tool.wrapped) {
                 Label("Riepilogo dell'anno", systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: 48)
             }
@@ -113,10 +138,13 @@ struct WrappedView: View {
     @State private var year = Calendar.current.component(.year, from: Date())
     @State private var page = 0
     @State private var appeared = false
+    @State private var cardImage: Image?
+    @State private var posterImage: Image?
 
     var body: some View {
-        let years = Array(Set(model.data.outings.map { Calendar.current.component(.year, from: $0.start) })).sorted(by: >)
-        let cards = Wrapped.cards(year: year, outings: model.data.outings, stamps: model.data.stamps)
+        let outings = model.data.mountainOutings
+        let years = Array(Set(outings.map { Calendar.current.component(.year, from: $0.start) })).sorted(by: >)
+        let cards = Wrapped.cards(year: year, outings: outings, stamps: model.data.stamps)
         VStack(spacing: 12) {
             if years.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -143,8 +171,30 @@ struct WrappedView: View {
         .background(m3.surface)
         .navigationTitle("Il tuo \(String(year))")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if !cards.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if page < cards.count, let img = cardImage {
+                            ShareLink(item: img, preview: SharePreview(cards[page].eyebrow, image: img)) {
+                                Label("Condividi questa scheda", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                        if let poster = posterImage {
+                            ShareLink(item: poster, preview: SharePreview("Il mio \(String(year)) in montagna", image: poster)) {
+                                Label("Condividi il riepilogo", systemImage: "square.grid.2x2")
+                            }
+                        }
+                    } label: { Image(systemName: "square.and.arrow.up") }
+                }
+            }
+        }
         .onAppear {
             if !years.contains(year), let y = years.first { year = y }
+        }
+        .task(id: "\(year)-\(page)-\(cards.count)") {
+            cardImage = page < cards.count ? WrappedShare.image(cards[page]) : nil
+            posterImage = cards.isEmpty ? nil : WrappedShare.poster(cards, year: year)
         }
     }
 }
@@ -152,9 +202,11 @@ struct WrappedView: View {
 struct WrappedCardView: View {
     let card: WrappedCard
     let visible: Bool
+    var staticShown = false
     @State private var shown = false
 
     var body: some View {
+        let shown = staticShown || self.shown
         let base = Color(rgb: RGBColor(hex: card.colorHex) ?? RGBColor(red: 0.2, green: 0.3, blue: 0.6))
         VStack(alignment: .leading, spacing: 18) {
             Spacer()
@@ -186,7 +238,56 @@ struct WrappedCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
         .padding(.bottom, 36)
         .onChange(of: visible, initial: true) { _, v in
-            if v { withAnimation(.spring(response: 0.6, dampingFraction: 0.65)) { shown = true } } else { shown = false }
+            if v { withAnimation(.spring(response: 0.6, dampingFraction: 0.65)) { self.shown = true } } else { self.shown = false }
         }
+    }
+}
+
+/// Renders the recap as images for Instagram stories (1080×1920).
+@MainActor
+enum WrappedShare {
+    static func image(_ card: WrappedCard) -> Image? {
+        let view = WrappedCardView(card: card, visible: true, staticShown: true)
+            .frame(width: 360, height: 640)
+            .background(Color.black)
+        return render(view)
+    }
+
+    static func poster(_ cards: [WrappedCard], year: Int) -> Image? {
+        let main = cards.filter { !["intro", "outro"].contains($0.id) }.prefix(6)
+        let intro = cards.first { $0.id == "intro" }
+        let view = VStack(alignment: .leading, spacing: 10) {
+            Text("Il mio \(String(year)) in montagna").font(.system(size: 26, weight: .heavy, design: .rounded))
+            if let intro { Text("\(intro.value) \(intro.caption)").font(.system(size: 18, weight: .semibold, design: .rounded)).opacity(0.9) }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(Array(main), id: \.id) { c in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Image(systemName: c.icon).font(.system(size: 20, weight: .bold))
+                        Text(c.eyebrow).font(.system(size: 11, weight: .semibold, design: .rounded)).opacity(0.85)
+                        Text(c.value).font(.system(size: 22, weight: .heavy, design: .rounded)).lineLimit(2).minimumScaleFactor(0.5)
+                        Text(c.caption).font(.system(size: 11)).lineLimit(2).opacity(0.85)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, minHeight: 130, alignment: .topLeading)
+                    .background(Color(rgb: RGBColor(hex: c.colorHex) ?? RGBColor(red: 0.2, green: 0.3, blue: 0.6)),
+                                in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+            }
+            Spacer(minLength: 0)
+            Text("Cresta").font(.system(size: 14, weight: .bold, design: .rounded)).opacity(0.7)
+        }
+        .foregroundStyle(.white)
+        .padding(22)
+        .frame(width: 360, height: 640, alignment: .topLeading)
+        .background(LinearGradient(colors: [Color(rgb: RGBColor(hex: "#0d47a1")!), Color(rgb: RGBColor(hex: "#1a1a2e")!)],
+                                   startPoint: .top, endPoint: .bottom))
+        return render(view)
+    }
+
+    private static func render<V: View>(_ view: V) -> Image? {
+        let r = ImageRenderer(content: view)
+        r.scale = 3
+        guard let ui = r.uiImage else { return nil }
+        return Image(uiImage: ui)
     }
 }

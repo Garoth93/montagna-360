@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Downloads named peaks (natural=peak) from OpenStreetMap via the Overpass
-API and writes the offline file bundled in the app:
+"""Downloads named places from OpenStreetMap via the Overpass API and writes
+the offline files bundled in the app (one per kind):
 
     osmId \t lat \t lon \t ele \t name
 
-Used by CI before building the .ipa. Area: Alps and Italian Apennines.
+    peaks     natural=peak
+    passes    mountain_pass=yes
+    skiareas  landuse=winter_sports (ways/relations, centre point)
+
+Usage: fetch_peaks.py <out.tsv> [peaks|passes|skiareas]
+Used by CI before building the app. Area: Alps and Italian Apennines.
 Data © OpenStreetMap contributors, ODbL.
 """
 import sys
@@ -26,13 +31,22 @@ TILES = [
 ]
 
 
-DEADLINE = time.time() + 18 * 60  # keep the CI job short
+DEADLINE = time.time() + 18 * 60  # keep the CI job short (per kind)
+
+
+SELECTORS = {
+    "peaks": 'node["natural"="peak"]["name"]({b});out;',
+    "passes": 'node["mountain_pass"="yes"]["name"]({b});out;',
+    "skiareas": '(way["landuse"="winter_sports"]["name"]({b});relation["landuse"="winter_sports"]["name"]({b}););out center;',
+}
+KIND = "peaks"
 
 
 def query(tile):
     s, w, n, e = tile
-    q = (f'[out:csv(::id,::lat,::lon,ele,name;false;"\\t")][timeout:180];'
-         f'node["natural"="peak"]["name"]({s},{w},{n},{e});out;')
+    sel = SELECTORS[KIND].replace("{b}", f"{s},{w},{n},{e}")
+    q = f'[out:csv(::type,::id,::lat,::lon,ele,name;false;"\\t")][timeout:180];{sel}'
+
     body = urllib.parse.urlencode({"data": q}).encode()
     last = None
     for attempt in range(2):
@@ -62,8 +76,10 @@ def main(out_path):
             continue
         for line in text.splitlines():
             f = line.split("\t")
-            if len(f) == 5 and f[4].strip():
-                rows[f[0]] = "\t".join(x.replace("\n", " ").strip() for x in f)
+            if len(f) == 6 and f[5].strip() and f[2] and f[3]:
+                # ways and relations get distinct ids from nodes (offset)
+                oid = int(f[1]) + {"node": 0, "way": 10**12, "relation": 2 * 10**12}.get(f[0], 0)
+                rows[str(oid)] = "\t".join([str(oid)] + [x.replace("\n", " ").strip() for x in f[2:]])
         print(f"tile {t}: total {len(rows)}", file=sys.stderr)
         time.sleep(2)
     if not rows:
@@ -76,4 +92,6 @@ def main(out_path):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 2:
+        KIND = sys.argv[2]
     sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "peaks.tsv"))

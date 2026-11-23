@@ -17,7 +17,7 @@ struct HomeView: View {
             : [.summits, .lastLight, .season, .last, .backpack, .go]
         // Late in the year: the recap goes to the top.
         let month = Calendar.current.component(.month, from: Date())
-        if month == 12 || month == 1, !model.data.outings.isEmpty { b.insert(.wrapped, at: 0) }
+        if month == 12 || month == 1, !model.data.mountainOutings.isEmpty { b.insert(.wrapped, at: 0) }
         if model.garageAlerts.isEmpty { b.removeAll { $0 == .garage } }
         return b
     }
@@ -96,12 +96,15 @@ struct SeasonSummaryCard: View {
 
     var body: some View {
         let season = Season.of(Date())
-        let st = StatsBuilder.season(season, outings: model.data.outings, stamps: model.data.stamps)
+        let st = StatsBuilder.season(season, outings: model.data.mountainOutings, stamps: model.data.stamps)
         NavigationLink(value: Tool.stats) {
             M3Card {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text(season.title).font(.m3TitleLarge).foregroundStyle(m3.onSurface)
+                        if model.data.settings.mountainOnly {
+                            TagLabel(text: "solo montagna", icon: "mountain.2.fill", tones: m3.neutral)
+                        }
                         Spacer()
                         Image(systemName: "chevron.right").foregroundStyle(m3.onSurfaceVariant)
                     }
@@ -170,7 +173,7 @@ struct SummitsSummaryCard: View {
                     IconBadge(icon: "flag.fill", tones: m3.tertiaryTones, size: 64, cookie: true, filled: true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(collected.count)").font(.m3DisplaySmall).contentTransition(.numericText())
-                        Text(collected.count == 1 ? "cima nell'album" : "cime nell'album").font(.m3LabelLarge)
+                        Text(collected.count == 1 ? "luogo nell'album" : "cime e passi nell'album").font(.m3LabelLarge)
                         if let last = model.data.stamps.max(by: { $0.date < $1.date }) {
                             Text("Ultima: \(last.peakName), \(Format.dayMonth(last.date))").font(.m3BodySmall).lineLimit(1)
                         }
@@ -193,13 +196,13 @@ struct GarageAlertCard: View {
         NavigationLink(value: Tool.garage) {
             M3Card(color: m3.warningContainer) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Sci Garage", systemImage: "wrench.and.screwdriver.fill").font(.m3TitleMedium)
+                    Label("Garage", systemImage: "wrench.and.screwdriver.fill").font(.m3TitleMedium)
                     ForEach(Array(alerts.prefix(3).enumerated()), id: \.offset) { _, a in
                         HStack {
                             Image(systemName: a.status.task.icon)
                             Text("\(a.status.task.title) · \(a.item.name)").font(.m3BodyMedium)
                             Spacer()
-                            Text(a.status.isDue ? "da fare" : "tra \(a.status.remaining) gg").font(.m3LabelLarge)
+                            Text(a.status.isDue ? "da fare" : "tra \(a.status.remaining) \(a.status.unit == .km ? "km" : "gg")").font(.m3LabelLarge)
                         }
                     }
                 }

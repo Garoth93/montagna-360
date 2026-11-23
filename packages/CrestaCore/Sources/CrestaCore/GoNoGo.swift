@@ -2,7 +2,7 @@ import Foundation
 
 /// Factors of the Go/No-Go score. Each can be switched off.
 public enum GoFactor: String, Codable, CaseIterable, Sendable, Identifiable {
-    case avalanche, weather, wind, freezingLevel, webcam, freshSnow
+    case avalanche, weather, wind, freezingLevel, webcam, freshSnow, snowDepth
 
     public var id: String { rawValue }
 
@@ -14,6 +14,7 @@ public enum GoFactor: String, Codable, CaseIterable, Sendable, Identifiable {
         case .freezingLevel: return "Zero termico"
         case .webcam: return "Webcam"
         case .freshSnow: return "Ultima nevicata"
+        case .snowDepth: return "Neve al suolo"
         }
     }
 
@@ -25,6 +26,7 @@ public enum GoFactor: String, Codable, CaseIterable, Sendable, Identifiable {
         case .freezingLevel: return "thermometer.snowflake"
         case .webcam: return "web.camera.fill"
         case .freshSnow: return "snowflake"
+        case .snowDepth: return "ruler.fill"
         }
     }
 
@@ -37,10 +39,11 @@ public enum GoFactor: String, Codable, CaseIterable, Sendable, Identifiable {
         case .freezingLevel: return 1
         case .webcam: return 1
         case .freshSnow: return 1
+        case .snowDepth: return 1
         }
     }
 
-    public var winterOnly: Bool { self == .avalanche || self == .freshSnow }
+    public var winterOnly: Bool { self == .avalanche || self == .freshSnow || self == .snowDepth }
 }
 
 /// What the user saw on the webcam.
@@ -180,6 +183,15 @@ public enum GoNoGo {
             // Fresh snow in the last 1–2 days = most avalanche-prone.
             let s: Double = d <= 1 ? 3 : d <= 3 ? 5.5 : d <= 7 ? 8 : 9.5
             return FactorScore(factor: f, score: s, detail: d == 0 ? "Nevicato oggi" : d == 1 ? "Nevicato ieri" : "Nevicato \(d) giorni fa", veto: false)
+        case .snowDepth:
+            guard let w = i.weather, let depth = w.snowDepth else {
+                return FactorScore(factor: f, score: nil, detail: "Neve al suolo non disponibile", veto: false)
+            }
+            // Enough snow to ski or walk on snow: more is better.
+            let s: Double = depth < 0.1 ? 1.5 : depth < 0.3 ? 4 : depth < 0.6 ? 7 : depth < 1 ? 8.5 : 10
+            var detail = "\(Int((depth * 100).rounded())) cm al suolo"
+            if w.freshSnow72h >= 1 { detail += " · \(Int(w.freshSnow72h.rounded())) cm freschi in 3 giorni" }
+            return FactorScore(factor: f, score: s, detail: detail, veto: false)
         }
     }
 }

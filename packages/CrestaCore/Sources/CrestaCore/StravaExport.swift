@@ -54,6 +54,8 @@ public struct StravaExportActivity: Equatable, Sendable, Identifiable {
     public var ascent: Double?
     public var descent: Double?
     public var maxSpeed: Double?
+    /// Gear name (shoes / bike), empty if none.
+    public var gear: String = ""
     /// Path inside the ZIP (e.g. "activities/123.gpx.gz"), empty if none.
     public var fileName: String
 
@@ -102,6 +104,8 @@ public enum StravaCSV {
         let iGain = find(["elevation gain", "dislivello positivo"])
         let iLoss = find(["elevation loss", "dislivello negativo"])
         let iMax = find(["max speed", "velocita massima", "velocita max"])
+        let iGear = find(["activity gear", "attrezzatura attivita", "attrezzatura dell'attivita"]) ?? pos(11)
+        let iGearExtra = [find(["bike", "bicicletta"]), find(["gear", "attrezzatura"])].compactMap { $0 }
         // Filename column by content when the header is unknown.
         if iFile == nil {
             iFile = header.indices.first { c in rows.dropFirst().prefix(50).contains { c < $0.count && $0[c].hasPrefix("activities/") } }
@@ -117,7 +121,9 @@ public enum StravaCSV {
             out.append(StravaExportActivity(
                 activityID: id, date: date(v(iDate)), name: v(iName), type: type, kind: ActivityKind.fromStrava(type),
                 description: v(iDesc), elapsed: number(v(iElapsed)), moving: number(v(iMoving)), distance: dist,
-                ascent: number(v(iGain)), descent: number(v(iLoss)), maxSpeed: number(v(iMax)), fileName: v(iFile)))
+                ascent: number(v(iGain)), descent: number(v(iLoss)), maxSpeed: number(v(iMax)),
+                gear: ([v(iGear)] + iGearExtra.map { v($0) }).first { !$0.isEmpty && Double($0) == nil } ?? "",
+                fileName: v(iFile)))
         }
         return out
     }
@@ -215,7 +221,8 @@ public enum DuplicateDetector {
 public enum OutingBuilder {
     public static func build(parsed: ParsedTrack?, name: String?, sport: String?, start: Date?, source: OutingSource,
                              stravaID: Int64? = nil, fallback: TrackStats? = nil, description: String = "",
-                             gear: [GearItem] = [], calendar: Calendar = .current) -> (outing: Outing, track: Track?)? {
+                             gear: [GearItem] = [], sourceGear: String? = nil, skiAreas: PeakIndex? = nil,
+                             calendar: Calendar = .current) -> (outing: Outing, track: Track?)? {
         let track = parsed?.track
         var stats = track.map(TrackStats.compute) ?? TrackStats()
         if let f = fallback {
@@ -244,7 +251,9 @@ public enum OutingBuilder {
         let outing = Outing(name: title, kind: kind, suggestedKind: suggestion.kind, start: startDate, stats: stats,
                             hasTrack: track?.isEmpty == false, preview: preview, startCoordinate: track?.points.first?.coordinate,
                             source: source, stravaID: stravaID, note: description,
-                            gearIDs: GarageLogic.defaultGear(for: kind, gear: gear))
+                            gearIDs: GarageLogic.defaultGear(for: kind, gear: gear),
+                            area: (kind == .resortSki || kind == .snowboard) ? track.flatMap { t in skiAreas.flatMap { SkiAreaNamer.name(for: t, areas: $0) } } : nil,
+                            sourceGear: sourceGear?.isEmpty == false ? sourceGear : nil)
         return (outing, simplified)
     }
 
@@ -299,11 +308,12 @@ public final class StravaExportReader: @unchecked Sendable {
 
     /// Outing for one activity. Activities without GPS file are kept with
     /// the numbers of the CSV.
-    public func outing(for a: StravaExportActivity, gear: [GearItem] = []) -> (outing: Outing, track: Track?)? {
+    public func outing(for a: StravaExportActivity, gear: [GearItem] = [], skiAreas: PeakIndex? = nil) -> (outing: Outing, track: Track?)? {
         let parsed = try? track(for: a)
         let fallback = TrackStats(distance: a.distance ?? 0, ascent: a.ascent ?? 0, descent: a.descent ?? 0, elapsed: a.elapsed ?? 0,
                                   moving: a.moving ?? a.elapsed ?? 0, maxSpeed: a.maxSpeed ?? 0)
         return OutingBuilder.build(parsed: parsed, name: a.name, sport: a.type, start: a.date, source: .stravaExport,
-                                   stravaID: a.activityID, fallback: fallback, description: a.description, gear: gear)
+                                   stravaID: a.activityID, fallback: fallback, description: a.description, gear: gear,
+                                   sourceGear: a.gear, skiAreas: skiAreas)
     }
 }

@@ -9,11 +9,14 @@ struct DiaryView: View {
     @State private var kind: ActivityKind?
     @State private var query = ""
     @State private var showAdd = false
+    @State private var mountainOnly = false
 
     private var filtered: [Outing] {
         let q = Search.fold(query)
+        let minAscent = model.data.settings.mountainMinAscent
         return model.outingsSorted.filter { o in
-            (season == nil || o.season == season) && (kind == nil || o.kind == kind)
+            (!mountainOnly || MountainFilter.isMountain(o, minAscent: minAscent))
+                && (season == nil || o.season == season) && (kind == nil || o.kind == kind)
                 && (q.isEmpty || Search.fold(o.name).contains(q) || Search.fold(o.note).contains(q))
         }
     }
@@ -48,6 +51,7 @@ struct DiaryView: View {
                 }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
+                        Chip(title: "Solo montagna", icon: "mountain.2.fill", selected: mountainOnly) { mountainOnly.toggle() }
                         ForEach(kinds) { k in Chip(title: k.title, icon: k.icon, selected: kind == k) { kind = kind == k ? nil : k } }
                     }
                 }
@@ -143,6 +147,9 @@ struct OutingDetailView: View {
                         ElevationProfile(track: track).frame(height: 120)
                     }
                 }
+            }
+            if o.kind == .resortSki || o.kind == .snowboard, let track {
+                SkiDaySection(track: track, area: o.area)
             }
             weatherCard(o)
             summitsSection(o)
@@ -242,10 +249,10 @@ struct OutingDetailView: View {
     @ViewBuilder
     private func summitsSection(_ o: Outing) -> some View {
         let stamps = model.data.stamps.filter { $0.outingID == o.id }
-        SectionTitle("Cime", trailing: stamps.isEmpty ? nil : "\(stamps.count)")
+        SectionTitle("Cime e passi", trailing: stamps.isEmpty ? nil : "\(stamps.count)")
         ForEach(stamps) { s in StampRow(stamp: s, showDate: false) }
         Button { showSummitPicker = true } label: {
-            Label("Timbra una cima", systemImage: "flag.badge.ellipsis").font(.m3LabelLarge).frame(maxWidth: .infinity, minHeight: 44)
+            Label("Timbra una cima o un passo", systemImage: "flag.badge.ellipsis").font(.m3LabelLarge).frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.bordered)
     }
@@ -386,7 +393,7 @@ struct SummitPickerSheet: View {
                     dismiss()
                 } label: {
                     HStack {
-                        Image(systemName: "mountain.2.fill").foregroundStyle(m3.tertiary)
+                        Image(systemName: p.kind.icon).foregroundStyle(m3.tertiary)
                         Text(p.name).foregroundStyle(m3.onSurface)
                         Spacer()
                         if let e = p.elevation { Text(Format.meters(e)).foregroundStyle(m3.onSurfaceVariant) }
@@ -395,11 +402,11 @@ struct SummitPickerSheet: View {
             }
             .overlay {
                 if candidates.isEmpty {
-                    ContentUnavailableView("Nessuna vetta vicina", systemImage: "mountain.2", description: Text("Cerca per nome."))
+                    ContentUnavailableView("Nessuna cima o passo vicino", systemImage: "mountain.2", description: Text("Cerca per nome."))
                 }
             }
-            .searchable(text: $query, prompt: "Cerca una vetta")
-            .navigationTitle("Timbra una cima")
+            .searchable(text: $query, prompt: "Cerca una cima o un passo")
+            .navigationTitle("Timbra")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Chiudi") { dismiss() } } }
         }
@@ -455,5 +462,77 @@ enum GPXWriter {
             s += "</trkpt>\n"
         }
         return s + "</trkseg></trk></gpx>\n"
+    }
+}
+
+/// Slopes-style breakdown of a resort ski day.
+struct SkiDaySection: View {
+    @Environment(\.m3) private var m3
+    let track: Track
+    let area: String?
+    @State private var analysis: SkiDayAnalysis?
+    @State private var showAll = false
+
+    var body: some View {
+        Group {
+            if let a = analysis, !a.runs.isEmpty {
+                SectionTitle("Giornata sugli sci", trailing: area)
+                M3Card {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            StatTile(value: "\(a.runs.count)", label: "discese", icon: "figure.skiing.downhill", tones: m3.primaryTones)
+                            StatTile(value: Format.meters(a.totalVertical), label: "dislivello in pista", icon: "arrow.down.right")
+                        }
+                        // Skiing vs lifts vs breaks.
+                        let total = max(1, a.runTime + a.liftTime + a.otherTime)
+                        GeometryReader { g in
+                            HStack(spacing: 3) {
+                                Capsule().fill(m3.primary).frame(width: max(8, g.size.width * a.runTime / total))
+                                Capsule().fill(Color.gray.opacity(0.6)).frame(width: max(8, g.size.width * a.liftTime / total))
+                                Capsule().fill(m3.surfaceContainerHighest)
+                            }
+                        }
+                        .frame(height: 12)
+                        HStack(spacing: 14) {
+                            legend(m3.primary, "Sci \(Format.duration(a.runTime))")
+                            legend(.gray, "Impianti \(Format.duration(a.liftTime))")
+                            legend(m3.surfaceContainerHighest, "Pause \(Format.duration(a.otherTime))")
+                        }
+                        .font(.m3LabelMedium).foregroundStyle(m3.onSurfaceVariant)
+                    }
+                }
+                let runs = showAll ? a.runs : Array(a.runs.prefix(5))
+                ForEach(runs) { r in
+                    HStack(spacing: 12) {
+                        Text("\(r.index)").font(.m3TitleMedium).foregroundStyle(m3.onPrimaryContainer)
+                            .frame(width: 34, height: 34).background(m3.primaryContainer, in: Circle())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(Format.meters(r.vertical)) · \(Format.km(r.distance))").font(.m3TitleSmall).foregroundStyle(m3.onSurface)
+                            Text([r.start.map { Format.time($0) }, Format.duration(r.duration), "da \(Int(r.topElevation)) m"].compactMap { $0 }.joined(separator: " · "))
+                                .font(.m3BodySmall).foregroundStyle(m3.onSurfaceVariant)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text("\(Int((r.maxSpeed * 3.6).rounded()))").font(.m3TitleLarge).foregroundStyle(r.id == a.fastestRun?.id ? m3.error : m3.onSurface)
+                            Text("km/h").font(.m3LabelSmall).foregroundStyle(m3.onSurfaceVariant)
+                        }
+                    }
+                    .padding(10)
+                    .background(m3.surfaceContainerLow, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                }
+                if a.runs.count > 5 {
+                    Button(showAll ? "Mostra meno" : "Tutte le \(a.runs.count) discese") { withAnimation(.m3Spatial) { showAll.toggle() } }
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .task(id: track.points.count) {
+            let t = track
+            analysis = await Task.detached { SkiDay.analyze(t) }.value
+        }
+    }
+
+    private func legend(_ c: Color, _ text: String) -> some View {
+        HStack(spacing: 4) { Circle().fill(c).frame(width: 8, height: 8); Text(text) }
     }
 }

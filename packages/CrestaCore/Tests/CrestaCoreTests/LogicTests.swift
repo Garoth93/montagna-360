@@ -100,7 +100,7 @@ final class LogicTests: XCTestCase {
         let r = GoNoGo.evaluate(GoNoGoInput(targetElevation: 2400, isWinterOuting: true, avalanche: .low, weather: good,
                                             daysSinceSnowfall: 8, webcam: .clear), enabled: Set(GoFactor.allCases))
         XCTAssertEqual(r.verdict, .go)
-        XCTAssertEqual(r.factors.count, 6)
+        XCTAssertEqual(r.factors.count, 7)
         let bad = GoNoGo.evaluate(GoNoGoInput(targetElevation: 2400, isWinterOuting: true, avalanche: .high, weather: good),
                                   enabled: Set(GoFactor.allCases))
         XCTAssertEqual(bad.verdict, .noGo)
@@ -189,9 +189,9 @@ final class LogicTests: XCTestCase {
                     stats: TrackStats(), hasTrack: false, source: .manual, gearIDs: [ski.id])]
         let st = GarageLogic.status(ski, outings: outings, calendar: Synthetic.utc)
         let wax = st.first { $0.task == .waxing }!
-        XCTAssertEqual(wax.daysUsed, 4)
+        XCTAssertEqual(wax.used, 4)
         XCTAssertTrue(wax.isDue)
-        XCTAssertEqual(st.first { $0.task == .sharpening }!.daysUsed, 4)
+        XCTAssertEqual(st.first { $0.task == .sharpening }!.used, 4)
         XCTAssertEqual(GarageLogic.alerts(gear: [ski], outings: outings).first?.status.task, .waxing)
         XCTAssertEqual(GarageLogic.defaultGear(for: .skiTouring, gear: [ski]), [ski.id])
         XCTAssertTrue(GarageLogic.defaultGear(for: .hike, gear: [ski]).isEmpty)
@@ -251,5 +251,108 @@ final class LogicTests: XCTestCase {
         full.gear = [GearItem(name: "g", type: .skis, intervals: [.waxing: 3])]
         let enc = try JSONFileStore<AppData>.encoder().encode(full)
         XCTAssertEqual(try JSONFileStore<AppData>.decoder.decode(AppData.self, from: enc), full)
+    }
+
+    func testMountainFilter() {
+        let flatRun = Outing(name: "r", kind: .run, start: Synthetic.summer, stats: TrackStats(distance: 10_000, ascent: 20, maxElevation: 50), hasTrack: true, source: .file)
+        let hillRun = Outing(name: "r2", kind: .run, start: Synthetic.summer, stats: TrackStats(distance: 12_000, ascent: 650), hasTrack: true, source: .file)
+        let alpRide = Outing(name: "b", kind: .bike, start: Synthetic.summer, stats: TrackStats(ascent: 100, maxElevation: 2200), hasTrack: true, source: .file)
+        let ski = Outing(name: "s", kind: .resortSki, start: Synthetic.t0, stats: TrackStats(), hasTrack: false, source: .file)
+        XCTAssertFalse(MountainFilter.isMountain(flatRun))
+        XCTAssertTrue(MountainFilter.isMountain(hillRun))
+        XCTAssertTrue(MountainFilter.isMountain(alpRide))
+        XCTAssertTrue(MountainFilter.isMountain(ski))
+        var d = AppData()
+        d.outings = [flatRun, hillRun, alpRide, ski]
+        XCTAssertEqual(d.mountainOutings.count, 3)
+        d.settings.mountainOnly = false
+        XCTAssertEqual(d.mountainOutings.count, 4)
+    }
+
+    func testSkiDayAnalysis() throws {
+        let a = try XCTUnwrap(SkiDay.analyze(Synthetic.resort()))
+        XCTAssertGreaterThanOrEqual(a.runs.count, 3)
+        XCTAssertGreaterThanOrEqual(a.lifts.count, 3)
+        XCTAssertEqual(a.runs[0].vertical, 400, accuracy: 60)
+        XCTAssertGreaterThan(a.runs[0].maxSpeed * 3.6, 30)
+        XCTAssertGreaterThan(a.liftTime, a.runTime) // 6 min lift vs 4 min run
+        XCTAssertGreaterThan(a.skiingShare, 0.2)
+        XCTAssertNotNil(a.longestRun)
+    }
+
+    func testLastLightHistory() {
+        let o = Outing(name: "g", kind: .hike, start: Synthetic.summer, stats: TrackStats(elapsed: 6 * 3600), hasTrack: true, source: .file)
+        let s = SummitStamp(peak: Synthetic.peak, date: Synthetic.summer.addingTimeInterval(3.5 * 3600), mode: .foot, outingID: o.id, automatic: true)
+        let h = LastLight.history(peakID: Synthetic.peak.id, stamps: [s], outings: [o])
+        XCTAssertEqual(h?.ascent, 3.5 * 3600)
+        XCTAssertEqual(h?.descent, 2.5 * 3600)
+        XCTAssertNil(LastLight.history(peakID: "osm:none", stamps: [s], outings: [o]))
+        let utc = TimeZone(identifier: "UTC")!
+        let plan = LastLight.plan(peak: Synthetic.peak, departure: ISOTime.parse("2025-03-20T07:00:00Z")!, ascent: h!.ascent, descent: h!.descent, timeZone: utc)
+        XCTAssertEqual(plan.summitArrival, ISOTime.parse("2025-03-20T10:30:00Z"))
+        XCTAssertNotNil(plan.turnaround)
+    }
+
+    func testGarageKmAndSourceGear() {
+        var a = Outing(name: "a", kind: .run, start: Synthetic.summer, stats: TrackStats(distance: 400_000), hasTrack: false, source: .stravaExport)
+        a.sourceGear = "Scarpe test"
+        var b = Outing(name: "b", kind: .run, start: Synthetic.summer.addingTimeInterval(86_400), stats: TrackStats(distance: 350_000), hasTrack: false, source: .stravaExport)
+        b.sourceGear = "scarpe TEST"
+        var c = Outing(name: "c", kind: .bike, start: Synthetic.summer, stats: TrackStats(distance: 50_000), hasTrack: false, source: .stravaExport)
+        c.sourceGear = "Bici test"
+        let r = GarageLogic.gearFromSources(outings: [a, b, c], gear: [])
+        XCTAssertEqual(r.newItems.count, 2)
+        let shoes = r.newItems.first { $0.type == .shoes }!
+        XCTAssertEqual(shoes.defaultFor, [.run, .trailRun])
+        XCTAssertEqual(r.newItems.first { $0.type == .bike }?.defaultFor, [.bike])
+        XCTAssertEqual(r.assignments[a.id], shoes.id)
+        XCTAssertEqual(r.assignments[b.id], shoes.id)
+        a.gearIDs = [shoes.id]; b.gearIDs = [shoes.id]
+        let st = GarageLogic.status(shoes, outings: [a, b, c]).first!
+        XCTAssertEqual(st.task, .shoeLife)
+        XCTAssertEqual(st.used, 750)
+        XCTAssertTrue(st.isDue)
+        XCTAssertEqual(st.unitLabel, "km")
+        // Already in the garage: nothing new, no reassignment.
+        XCTAssertTrue(GarageLogic.gearFromSources(outings: [a, b], gear: [shoes]).newItems.isEmpty)
+        XCTAssertTrue(GarageLogic.gearFromSources(outings: [a, b], gear: [shoes]).assignments.isEmpty)
+    }
+
+    func testSnowDepthFactor() {
+        let json = """
+        {"utc_offset_seconds":0,"hourly":{"time":["2025-01-13T12:00","2025-01-14T12:00","2025-01-15T09:00","2025-01-15T10:00"],
+         "weather_code":[71,71,1,1],"snowfall":[10,5,0,0],"snow_depth":[0.5,0.6,0.62,0.65],"wind_speed_10m":[5,5,5,5]}}
+        """
+        let r = try! OpenMeteo.decode(Data(json.utf8))
+        let w = OpenMeteo.window(r, from: ISOTime.parse("2025-01-15T08:00:00Z")!, to: ISOTime.parse("2025-01-15T16:00:00Z")!)
+        XCTAssertEqual(w.snowDepth, 0.65)
+        XCTAssertEqual(w.freshSnow72h, 15)
+        let res = GoNoGo.evaluate(GoNoGoInput(targetElevation: 2000, isWinterOuting: true, weather: w), enabled: [.snowDepth])
+        XCTAssertEqual(res.factors.first?.score, 8.5)
+        XCTAssertTrue(res.factors.first!.detail.contains("15 cm freschi"))
+        // Old settings without the new factor get it switched on once.
+        let old = try! JSONFileStore<Settings>.decoder.decode(Settings.self, from: Data(#"{"goFactors":["wind"]}"#.utf8))
+        XCTAssertEqual(old.goFactors, [.wind, .snowDepth])
+        let new = try! JSONFileStore<Settings>.decoder.decode(Settings.self, from: Data(#"{"goFactors":["wind"],"goFactorsVersion":2}"#.utf8))
+        XCTAssertEqual(new.goFactors, [.wind])
+    }
+
+    func testPlaceKindsAndSkiAreas() throws {
+        let old = try JSONFileStore<Peak>.decoder.decode(Peak.self, from: Data(#"{"id":"user:1","name":"X","lat":10,"lon":20}"#.utf8))
+        XCTAssertEqual(old.kind, .peak)
+        let passes = PeakFile.parse("5\t10.01\t20.0\t1900\tPasso Test", kind: .pass)
+        XCTAssertEqual(passes.first?.kind, .pass)
+        XCTAssertEqual(SummitStamp(peak: passes[0], date: Synthetic.t0, mode: .bike).kind, .pass)
+        XCTAssertTrue(PeakFile.overpassQuery(BoundingBox(minLat: 1, minLon: 2, maxLat: 3, maxLon: 4), kind: .pass).contains("mountain_pass"))
+        XCTAssertTrue(PeakFile.overpassQuery(BoundingBox(minLat: 1, minLon: 2, maxLat: 3, maxLon: 4), kind: .skiArea).contains("out center"))
+        let areas = PeakIndex(peaks: [Peak(id: "osm:9", name: "Comprensorio Test", lat: 10.02, lon: 20.0, elevation: nil, kind: .skiArea)])
+        XCTAssertEqual(SkiAreaNamer.name(for: Synthetic.resort(), areas: areas), "Comprensorio Test")
+        XCTAssertNil(SkiAreaNamer.name(for: Synthetic.resort(), areas: PeakIndex(peaks: [])))
+        let built = OutingBuilder.build(parsed: ParsedTrack(track: Synthetic.resort(), sport: "AlpineSki"), name: "s", sport: nil, start: nil,
+                                        source: .file, skiAreas: areas)!.outing
+        XCTAssertEqual(built.area, "Comprensorio Test")
+        let st = StatsBuilder.areas([built, built], calendar: Synthetic.utc)
+        XCTAssertEqual(st.first?.name, "Comprensorio Test")
+        XCTAssertEqual(st.first?.days, 1)
     }
 }

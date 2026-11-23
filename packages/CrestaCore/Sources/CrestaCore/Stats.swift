@@ -56,6 +56,15 @@ public enum StatsBuilder {
         return t
     }
 
+    /// Ski days grouped by ski area, most days first.
+    public static func areas(_ outings: [Outing], calendar: Calendar = .current) -> [(name: String, days: Int, descent: Double)] {
+        let ski = outings.filter { ($0.kind == .resortSki || $0.kind == .snowboard) && $0.area != nil }
+        return Dictionary(grouping: ski, by: { $0.area! }).map { name, list in
+            let days = Set(list.map { calendar.dateComponents([.year, .month, .day], from: $0.start) }).count
+            return (name: name, days: days, descent: list.reduce(0) { $0 + $1.stats.descent })
+        }.sorted { $0.days != $1.days ? $0.days > $1.days : $0.name < $1.name }
+    }
+
     public static func seasons(_ outings: [Outing]) -> [Season] {
         Array(Set(outings.map(\.season))).sorted(by: >)
     }
@@ -105,7 +114,7 @@ public enum Wrapped {
         cards.append(WrappedCard(id: "distance", icon: "point.topleft.down.to.point.bottomright.curvepath.fill", eyebrow: "Distanza",
                                  value: Format.km(t.distance), caption: "in \(Format.duration(t.moving)) di movimento", colorHex: "#2e7d32"))
         if t.summits > 0 {
-            cards.append(WrappedCard(id: "summits", icon: "flag.fill", eyebrow: "Cime timbrate", value: "\(t.summits)",
+            cards.append(WrappedCard(id: "summits", icon: "flag.fill", eyebrow: "Cime e passi timbrati", value: "\(t.summits)",
                                      caption: t.newSummits > 0 ? "\(t.newSummits) mai salite prima" : "vecchie amiche", colorHex: "#6a1b9a"))
             if let top = stamps.max(by: { ($0.elevation ?? 0) < ($1.elevation ?? 0) }) {
                 cards.append(WrappedCard(id: "highest", icon: "triangle.fill", eyebrow: "La più alta", value: top.peakName,
@@ -127,6 +136,15 @@ public enum Wrapped {
                 cards.append(WrappedCard(id: "speed", icon: "gauge.with.dots.needle.67percent", eyebrow: "Velocità massima",
                                          value: Format.speed(st.maxSpeed), caption: "il tuo momento più veloce", colorHex: "#d84315"))
             }
+        }
+        if let area = StatsBuilder.areas(outings, calendar: calendar).first, area.days > 1 {
+            cards.append(WrappedCard(id: "area", icon: "figure.skiing.downhill", eyebrow: "Il tuo comprensorio", value: area.name,
+                                     caption: "\(area.days) giornate sugli sci", colorHex: "#1565c0"))
+        }
+        let passes = stamps.filter { $0.kind == .pass }
+        if !passes.isEmpty {
+            cards.append(WrappedCard(id: "passes", icon: "road.lanes.curved.right", eyebrow: "Passi", value: "\(Set(passes.map(\.peakID)).count)",
+                                     caption: "valichi conquistati", colorHex: "#ef6c00"))
         }
         let kinds = Dictionary(grouping: outings, by: \.kind).mapValues(\.count)
         if let top = kinds.max(by: { $0.value < $1.value }) {

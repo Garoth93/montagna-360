@@ -57,3 +57,5 @@ export_*/
 cresta-backup*.json
 cresta-data*.json
 apps/*/Resources/peaks.tsv
+apps/*/Resources/passes.tsv
+apps/*/Resources/skiareas.tsv

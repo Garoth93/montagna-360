@@ -9,6 +9,7 @@ struct TrackMapView: View {
     let outingID: UUID
     var interactive = true
     @State private var track: Track?
+    @State private var ski: SkiDayAnalysis?
 
     var body: some View {
         let stamps = model.data.stamps.filter { $0.outingID == outingID }
@@ -16,8 +17,20 @@ struct TrackMapView: View {
             if let track, !track.isEmpty {
                 let coords = track.coordinates.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
                 Map(initialPosition: .rect(Self.rect(for: track)), interactionModes: interactive ? .all : []) {
-                    MapPolyline(coordinates: coords)
-                        .stroke(m3.primary, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    if let ski {
+                        // Ski day: lifts dashed and grey, runs in colour.
+                        ForEach(Array(ski.lifts.enumerated()), id: \.offset) { _, r in
+                            MapPolyline(coordinates: Array(coords[r]))
+                                .stroke(Color.gray, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [6, 5]))
+                        }
+                        ForEach(ski.runs) { run in
+                            MapPolyline(coordinates: Array(coords[run.startIndex...run.endIndex]))
+                                .stroke(m3.primary, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                        }
+                    } else {
+                        MapPolyline(coordinates: coords)
+                            .stroke(m3.primary, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    }
                     if let first = coords.first {
                         Annotation("Partenza", coordinate: first) {
                             Circle().fill(m3.success).frame(width: 14, height: 14).overlay(Circle().stroke(.white, lineWidth: 3))
@@ -30,7 +43,7 @@ struct TrackMapView: View {
                     }
                     ForEach(stamps) { s in
                         Annotation(s.peakName, coordinate: CLLocationCoordinate2D(latitude: s.coordinate.lat, longitude: s.coordinate.lon)) {
-                            Image(systemName: "flag.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(m3.onTertiaryContainer)
+                            Image(systemName: s.kind == .pass ? "road.lanes.curved.right" : "flag.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(m3.onTertiaryContainer)
                                 .padding(6).background(m3.tertiaryContainer, in: Circle())
                         }
                     }
@@ -43,7 +56,13 @@ struct TrackMapView: View {
         }
         .task(id: outingID) {
             let id = outingID
-            track = await Task.detached { TrackStore.load(id) }.value ?? Track(points: [])
+            let isSki = model.outing(id).map { $0.kind == .resortSki || $0.kind == .snowboard } ?? false
+            let loaded = await Task.detached { () -> (Track, SkiDayAnalysis?) in
+                let t = TrackStore.load(id) ?? Track(points: [])
+                return (t, isSki ? SkiDay.analyze(t) : nil)
+            }.value
+            track = loaded.0
+            ski = loaded.1
         }
     }
 

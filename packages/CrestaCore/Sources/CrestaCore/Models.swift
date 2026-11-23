@@ -38,15 +38,21 @@ public struct Outing: Codable, Equatable, Identifiable, Sendable {
     public var gearIDs: [UUID]
     public var summitStampIDs: [UUID]
     public var createdAt: Date
+    /// Ski area of resort ski days (OSM name), when found.
+    public var area: String?
+    /// Gear name given by the source (Strava export), used to fill the garage.
+    public var sourceGear: String?
 
     public init(id: UUID = UUID(), name: String, kind: ActivityKind, kindIsManual: Bool = false, suggestedKind: ActivityKind? = nil,
                 start: Date, stats: TrackStats, hasTrack: Bool, preview: [Coordinate] = [], startCoordinate: Coordinate? = nil,
                 source: OutingSource, stravaID: Int64? = nil, weather: WeatherSnapshot? = nil, note: String = "",
-                photos: [String] = [], gearIDs: [UUID] = [], summitStampIDs: [UUID] = [], createdAt: Date = Date()) {
+                photos: [String] = [], gearIDs: [UUID] = [], summitStampIDs: [UUID] = [], createdAt: Date = Date(),
+                area: String? = nil, sourceGear: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.kindIsManual = kindIsManual; self.suggestedKind = suggestedKind
         self.start = start; self.stats = stats; self.hasTrack = hasTrack; self.preview = preview
         self.startCoordinate = startCoordinate; self.source = source; self.stravaID = stravaID; self.weather = weather
         self.note = note; self.photos = photos; self.gearIDs = gearIDs; self.summitStampIDs = summitStampIDs; self.createdAt = createdAt
+        self.area = area; self.sourceGear = sourceGear
     }
 
     public var end: Date { start.addingTimeInterval(stats.elapsed) }
@@ -68,12 +74,17 @@ public struct SummitStamp: Codable, Equatable, Identifiable, Sendable {
     public var note: String
     /// Created by the automatic track matching (can be removed by the user).
     public var automatic: Bool
+    /// nil = summit (stamps saved before passes existed).
+    public var placeKind: PeakKind?
+
+    public var kind: PeakKind { placeKind ?? .peak }
 
     public init(id: UUID = UUID(), peak: Peak, date: Date, mode: SummitMode, modeIsManual: Bool = false,
                 weather: WeatherSnapshot? = nil, outingID: UUID? = nil, note: String = "", automatic: Bool = false) {
         self.id = id; self.peakID = peak.id; self.peakName = peak.name; self.elevation = peak.elevation
         self.coordinate = peak.coordinate; self.date = date; self.mode = mode; self.modeIsManual = modeIsManual
         self.weather = weather; self.outingID = outingID; self.note = note; self.automatic = automatic
+        self.placeKind = peak.kind
     }
 }
 
@@ -129,6 +140,14 @@ public struct Settings: Codable, Equatable, Sendable {
     public var lastLightNotifyBefore: Double = 30    // minutes
     public var importSports: Set<ActivityKind> = Set(ActivityKind.allCases)
     public var notificationsEnabled = true
+    /// Home, statistics and recap show mountain outings only (flat runs and
+    /// rides stay in the diary).
+    public var mountainOnly = true
+    public var mountainMinAscent: Double = 300
+    /// Sports downloaded by the Strava sync.
+    public var syncSports: Set<ActivityKind> = Set(ActivityKind.allCases)
+    /// Bumped when new Go/No-Go factors are added, to switch them on once.
+    public var goFactorsVersion = 2
 
     public init() {}
 
@@ -149,6 +168,12 @@ public struct Settings: Codable, Equatable, Sendable {
         lastLightNotifyBefore = (try? c.decode(Double.self, forKey: .lastLightNotifyBefore)) ?? d.lastLightNotifyBefore
         importSports = (try? c.decode(Set<ActivityKind>.self, forKey: .importSports)) ?? d.importSports
         notificationsEnabled = (try? c.decode(Bool.self, forKey: .notificationsEnabled)) ?? d.notificationsEnabled
+        mountainOnly = (try? c.decode(Bool.self, forKey: .mountainOnly)) ?? d.mountainOnly
+        mountainMinAscent = (try? c.decode(Double.self, forKey: .mountainMinAscent)) ?? d.mountainMinAscent
+        syncSports = (try? c.decode(Set<ActivityKind>.self, forKey: .syncSports)) ?? d.syncSports
+        let version = (try? c.decode(Int.self, forKey: .goFactorsVersion)) ?? 1
+        if version < 2 { goFactors.insert(.snowDepth) }
+        goFactorsVersion = d.goFactorsVersion
     }
 }
 
@@ -187,7 +212,25 @@ public struct AppData: Codable, Equatable, Sendable {
 
     public func outing(_ id: UUID?) -> Outing? { id.flatMap { i in outings.first { $0.id == i } } }
 
+    /// Outings that count for home, statistics and recap.
+    public var mountainOutings: [Outing] {
+        settings.mountainOnly ? outings.filter { MountainFilter.isMountain($0, minAscent: settings.mountainMinAscent) } : outings
+    }
+
     public func stamps(for peakID: String) -> [SummitStamp] {
         stamps.filter { $0.peakID == peakID }.sorted { $0.date > $1.date }
+    }
+}
+
+/// Mountain vs training: snow, hiking, climbing and trail always count;
+/// runs, rides and walks only with real climbing or altitude.
+public enum MountainFilter {
+    public static func isMountain(_ o: Outing, minAscent: Double = 300) -> Bool {
+        switch o.kind {
+        case .resortSki, .skiTouring, .nordicSki, .snowboard, .snowshoe, .hike, .ferrata, .climbing, .trailRun:
+            return true
+        case .run, .bike, .mtb, .walk, .other:
+            return o.stats.ascent >= minAscent || (o.stats.maxElevation ?? 0) >= 1200 || !o.summitStampIDs.isEmpty
+        }
     }
 }

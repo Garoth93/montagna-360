@@ -12,31 +12,37 @@ struct PeaksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SegmentedPills(options: [(0, "Album", "square.grid.2x2.fill"), (1, "Mappa", "map.fill")], selection: $mode)
+            SegmentedPills(options: [(0, "Cime", "mountain.2.fill"), (1, "Passi", "road.lanes.curved.right"), (2, "Mappa", "map.fill")], selection: $mode)
                 .padding(.horizontal, 16).padding(.vertical, 8)
-            if mode == 0 { album } else { PeakMapView() }
+            if mode == 2 { PeakMapView() } else { album }
         }
         .background(m3.surface)
-        .navigationTitle("Cime")
-        .searchable(text: $query, prompt: "Cerca tra \(Format.number(Double(model.peakIndex.count))) vette")
+        .navigationTitle(mode == 1 ? "Passi" : "Cime")
+        .searchable(text: $query, prompt: mode == 1 ? "Cerca tra \(Format.number(Double(model.peakIndex.count(of: .pass)))) passi"
+                    : "Cerca tra \(Format.number(Double(model.peakIndex.count(of: .peak)))) vette")
         .navigationDestination(for: String.self) { PeakDetailView(peakID: $0) }
         .navigationDestination(for: UUID.self) { OutingDetailView(outingID: $0) }
     }
+
+    private var kind: PeakKind { mode == 1 ? .pass : .peak }
 
     @ViewBuilder
     private var album: some View {
         ScreenScroll {
             if !query.isEmpty {
-                let results = model.peakIndex.search(query)
+                let results = model.peakIndex.search(query, kind: kind)
                 ForEach(results) { p in
                     NavigationLink(value: p.id) { PeakRow(peak: p, count: model.data.stamps(for: p.id).count) }.buttonStyle(PressableStyle())
                 }
                 if results.isEmpty {
-                    EmptyStateView(icon: "magnifyingglass", title: "Nessuna vetta", message: model.peakIndex.count == 0
-                                   ? "L'archivio delle vette è vuoto: scaricalo dalla mappa." : "Prova un altro nome.")
+                    EmptyStateView(icon: "magnifyingglass", title: kind == .pass ? "Nessun passo" : "Nessuna vetta",
+                                   message: model.peakIndex.count(of: kind) == 0
+                                   ? "L'archivio è vuoto: scarica la zona dalla mappa." : "Prova un altro nome.")
                 }
             } else {
-                let collected = model.collectedPeaks.filter { c in modeFilter == nil || c.stamps.contains { $0.mode == modeFilter } }
+                let collected = model.collectedPeaks.filter { c in
+                    c.stamps.first?.kind == kind && (modeFilter == nil || c.stamps.contains { $0.mode == modeFilter })
+                }
                 header(collected.count)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -45,8 +51,11 @@ struct PeaksView: View {
                     }
                 }
                 if collected.isEmpty {
-                    EmptyStateView(icon: "flag.fill", title: "Ancora nessuna cima",
-                                   message: "Le vette vengono timbrate da sole quando importi tracce che passano in cima. Puoi anche cercarne una e timbrarla a mano.")
+                    EmptyStateView(icon: kind == .pass ? "road.lanes.curved.right" : "flag.fill",
+                                   title: kind == .pass ? "Ancora nessun passo" : "Ancora nessuna cima",
+                                   message: kind == .pass
+                                   ? "I passi vengono timbrati da soli quando una traccia ci passa sopra, in bici o a piedi. Puoi anche cercarne uno e timbrarlo a mano."
+                                   : "Le vette vengono timbrate da sole quando importi tracce che passano in cima. Puoi anche cercarne una e timbrarla a mano.")
                 } else {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                         ForEach(collected, id: \.peakID) { c in
@@ -59,10 +68,11 @@ struct PeaksView: View {
     }
 
     private func header(_ count: Int) -> some View {
-        let highest = model.data.stamps.compactMap(\.elevation).max()
-        let total = model.data.stamps.count
+        let mine = model.data.stamps.filter { $0.kind == kind }
+        let highest = mine.compactMap(\.elevation).max()
+        let total = mine.count
         return HStack(spacing: 10) {
-            StatTile(value: "\(count)", label: "cime diverse", icon: "flag.fill", tones: m3.tertiaryTones)
+            StatTile(value: "\(count)", label: kind == .pass ? "passi diversi" : "cime diverse", icon: kind.icon, tones: m3.tertiaryTones)
             StatTile(value: "\(total)", label: "timbri", icon: "seal.fill")
             StatTile(value: highest.map { Format.meters($0) } ?? "—", label: "la più alta", icon: "triangle.fill")
         }
@@ -82,7 +92,7 @@ struct StampCard: View {
                 CookieShape(lobes: 14, depth: 0.05).fill(t.container)
                 CookieShape(lobes: 14, depth: 0.05).stroke(t.accent, style: StrokeStyle(lineWidth: 2, dash: [4, 3])).padding(6)
                 VStack(spacing: 2) {
-                    Image(systemName: s.mode.icon).font(.system(size: 20, weight: .bold))
+                    Image(systemName: s.kind == .pass ? "road.lanes.curved.right" : s.mode.icon).font(.system(size: 20, weight: .bold))
                     Text(s.elevation.map { "\(Int($0))" } ?? "—").font(.m3TitleLarge)
                     Text("m").font(.m3LabelSmall)
                 }
@@ -120,10 +130,10 @@ struct PeakRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            IconBadge(icon: count > 0 ? "flag.fill" : "mountain.2.fill", tones: count > 0 ? m3.tertiaryTones : m3.neutral, size: 44)
+            IconBadge(icon: count > 0 ? "flag.fill" : peak.kind.icon, tones: count > 0 ? m3.tertiaryTones : m3.neutral, size: 44)
             VStack(alignment: .leading, spacing: 2) {
                 Text(peak.name).font(.m3TitleSmall).foregroundStyle(m3.onSurface).lineLimit(1)
-                Text(count > 0 ? "Salita \(count == 1 ? "una volta" : "\(count) volte")" : "Non ancora salita")
+                Text(count > 0 ? "Raggiunto \(count == 1 ? "una volta" : "\(count) volte")" : (peak.kind == .pass ? "Passo · non ancora raggiunto" : "Non ancora salita"))
                     .font(.m3BodySmall).foregroundStyle(m3.onSurfaceVariant)
             }
             Spacer()
@@ -182,7 +192,7 @@ struct PeakDetailView: View {
     var body: some View {
         let stamps = model.data.stamps(for: peakID)
         let peak = model.peakIndex.peak(id: peakID) ?? stamps.first.map {
-            Peak(id: $0.peakID, name: $0.peakName, lat: $0.coordinate.lat, lon: $0.coordinate.lon, elevation: $0.elevation)
+            Peak(id: $0.peakID, name: $0.peakName, lat: $0.coordinate.lat, lon: $0.coordinate.lon, elevation: $0.elevation, kind: $0.kind)
         }
         ScreenScroll {
             if let peak {
@@ -200,7 +210,7 @@ struct PeakDetailView: View {
                         .font(.m3BodyMedium).foregroundStyle(m3.onSurfaceVariant)
                 }
                 PillButton(title: "Timbra oggi", icon: "flag.fill", tones: m3.tertiaryTones) {
-                    stampMode = model.seasonKind == .winter ? .ski : .foot
+                    stampMode = peak.kind == .pass ? .bike : model.seasonKind == .winter ? .ski : .foot
                     stampDate = Date()
                     showStamp = true
                 }
@@ -210,7 +220,7 @@ struct PeakDetailView: View {
                 .buttonStyle(.bordered)
                 SectionTitle("Timbri", trailing: stamps.isEmpty ? nil : "\(stamps.count)")
                 if stamps.isEmpty {
-                    Text("Non l'hai ancora salita.").font(.m3BodyMedium).foregroundStyle(m3.onSurfaceVariant)
+                    Text(peak.kind == .pass ? "Non ci sei ancora passato." : "Non l'hai ancora salita.").font(.m3BodyMedium).foregroundStyle(m3.onSurfaceVariant)
                 }
                 ForEach(stamps) { s in
                     if let oid = s.outingID {
@@ -269,7 +279,7 @@ struct PeakMapView: View {
         ZStack(alignment: .bottom) {
             Map(position: $position, selection: $selected) {
                 ForEach(visible) { p in
-                    Marker(p.name, systemImage: visited.contains(p.id) ? "flag.fill" : "mountain.2.fill",
+                    Marker(p.name, systemImage: visited.contains(p.id) ? "flag.fill" : p.kind.icon,
                            coordinate: CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon))
                         .tint(visited.contains(p.id) ? m3.tertiary : m3.outline)
                         .tag(p.id)
@@ -298,7 +308,7 @@ struct PeakMapView: View {
                 } label: {
                     HStack(spacing: 8) {
                         if downloading { ProgressView().tint(m3.onPrimary) } else { Image(systemName: "arrow.down.circle.fill") }
-                        Text("Scarica le vette di questa zona").font(.m3LabelLarge)
+                        Text("Scarica cime e passi di questa zona").font(.m3LabelLarge)
                     }
                     .padding(.horizontal, 18).frame(height: 48)
                     .foregroundStyle(m3.onPrimary).background(m3.primary, in: Capsule())

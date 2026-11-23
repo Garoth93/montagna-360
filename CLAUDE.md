@@ -52,7 +52,22 @@ Package `CrestaCore` (Foundation only, testato su Linux):
   `OutingBuilder` è il punto unico che crea le uscite (export, file, API e,
   in futuro, `TrackRecorder`).
 - `ModeClassifier` (tipo di uscita da velocità/dislivello/stagione),
-  `SummitMatcher` + `PeakIndex` (griglia 0,05°), `PeakFile` (TSV OSM).
+  `SummitMatcher` + `PeakIndex` (griglia 0,05°, indice per id), `PeakFile`
+  (TSV OSM) con `PeakKind` (`peak`, `pass`, `skiArea`): vette e passi nello
+  stesso indice e nello stesso album (timbri con `placeKind`), comprensori in
+  un indice a parte usato da `SkiAreaNamer` (nome del comprensorio delle
+  giornate di sci, `Outing.area`).
+- `MountainFilter` / `AppData.mountainOutings`: montagna vs allenamento
+  (`Settings.mountainOnly`, `mountainMinAscent`), usato da Oggi, Statistiche,
+  riepilogo; il Diario mostra tutto.
+- `SkiDay` (discese, impianti, tempo sugli sci, stile Slopes),
+  `LastLight.history` (tempi reali dalle salite passate con traccia).
+- Garage: `MaintenanceTask.unit` giorni (sci) o km (scarpe, bici),
+  `GarageLogic.gearFromSources` (attrezzatura dall'export Strava,
+  `Outing.sourceGear`).
+- Nei dati della sorgente (CSV/API) vincono distanza, dislivello, tempo e
+  velocità max del dispositivo; la velocità dalla traccia si calcola solo dalle
+  posizioni (il campo velocità dei FIT non è affidabile).
 - `Sun` (NOAA, offline), `LastLight` (ora limite), `GoNoGo` (punteggio con
   pesi e veto), `AvalancheBulletin` (CAAML v6 + HTML), `OpenMeteo`.
 - `Backpack`, `GarageLogic`, `Season` (inverno 15/11–30/4), `StatsBuilder`,
@@ -86,7 +101,7 @@ scelto dall'utente).
 | Workflow | Trigger | Cosa fa |
 |----------|---------|---------|
 | `build-simulator.yml` | push, PR, manuale | build per Simulator, mostra gli errori di compilazione |
-| `build-ipa.yml` | push su `main`/`claude/**`, manuale | scarica le vette OSM (cache mensile), build Release senza firma, `.ipa` come artifact (30 giorni) |
+| `build-ipa.yml` | push su `main`/`claude/**`, manuale | scarica vette, passi e comprensori OSM (`scripts/fetch_peaks.py`, cache mensile per tipo), build Release senza firma, `.ipa` come artifact (30 giorni) |
 | `test-linux.yml` | push, PR, manuale | `swift test` dei package |
 | `testflight.yml` | manuale, push su `main`/`claude/**` (solo `apps/`, `packages/`), ogni ~60 giorni (1° dei mesi dispari, sul branch di default) | archive firmato + export App Store + upload su TestFlight |
 
@@ -108,7 +123,8 @@ Procedura identica a `Garoth93/tessere-IOS` (vedi il suo CLAUDE.md):
   e profili; il certificato di sviluppo creato sul runner viene revocato
   (`scripts/asc_revoke_certs.py`). Log nell'artifact `testflight-logs`;
 - le build TestFlight scadono dopo 90 giorni: la schedulazione le rinnova;
-- l'archivio vette OSM viene preso dalla cache di `build-ipa.yml`.
+- gli archivi OSM (vette, passi, comprensori) vengono presi dalla cache di
+  `build-ipa.yml`.
 
 ## Regole di lavoro (per Claude)
 

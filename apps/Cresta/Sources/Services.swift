@@ -65,28 +65,42 @@ enum PhotoStore {
     static func delete(_ name: String) { try? FileManager.default.removeItem(at: url(name)) }
 }
 
-/// Offline peak database: the file bundled at build time (OpenStreetMap)
-/// plus areas downloaded from the app.
+/// Offline OSM databases: files bundled at build time (peaks, passes, ski
+/// areas) plus areas downloaded from the app.
 enum PeakDatabase {
-    static func load() -> (peaks: [Peak], bundled: Int) {
-        var peaks: [Peak] = []
-        var bundled = 0
-        if let url = Bundle.main.url(forResource: "peaks", withExtension: "tsv"),
-           let text = try? String(contentsOf: url, encoding: .utf8) {
-            peaks = PeakFile.parse(text)
-            bundled = peaks.count
-        }
-        if let text = try? String(contentsOf: AppFiles.extraPeaks, encoding: .utf8) {
-            peaks += PeakFile.parse(text)
-        }
-        return (peaks, bundled)
+    struct Loaded: Sendable {
+        var places: [Peak] = []      // peaks + passes
+        var skiAreas: [Peak] = []
+        var bundled: [PeakKind: Int] = [:]
     }
 
-    static func appendDownloaded(_ new: [Peak]) {
-        var existing = (try? String(contentsOf: AppFiles.extraPeaks, encoding: .utf8)).map(PeakFile.parse) ?? []
+    static func extraURL(_ kind: PeakKind) -> URL {
+        kind == .peak ? AppFiles.extraPeaks : AppFiles.base.appendingPathComponent("\(kind.fileName)-extra.tsv")
+    }
+
+    static func load() -> Loaded {
+        var out = Loaded()
+        for kind in PeakKind.allCases {
+            var list: [Peak] = []
+            if let url = Bundle.main.url(forResource: kind.fileName, withExtension: "tsv"),
+               let text = try? String(contentsOf: url, encoding: .utf8) {
+                list = PeakFile.parse(text, kind: kind)
+                out.bundled[kind] = list.count
+            }
+            if let text = try? String(contentsOf: extraURL(kind), encoding: .utf8) {
+                list += PeakFile.parse(text, kind: kind)
+            }
+            if kind == .skiArea { out.skiAreas = list } else { out.places += list }
+        }
+        return out
+    }
+
+    static func appendDownloaded(_ new: [Peak], kind: PeakKind) {
+        let url = extraURL(kind)
+        var existing = (try? String(contentsOf: url, encoding: .utf8)).map { PeakFile.parse($0, kind: kind) } ?? []
         let ids = Set(existing.map(\.id))
         existing += new.filter { !ids.contains($0.id) }
-        try? PeakFile.serialize(existing).write(to: AppFiles.extraPeaks, atomically: true, encoding: .utf8)
+        try? PeakFile.serialize(existing).write(to: url, atomically: true, encoding: .utf8)
     }
 }
 
@@ -210,7 +224,7 @@ enum AvalancheService {
 enum OverpassService {
     static let endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]
 
-    static func peaks(in box: BoundingBox) async throws -> [Peak] {
+    static func places(in box: BoundingBox, kind: PeakKind) async throws -> [Peak] {
         var lastError: Error = URLError(.cannotConnectToHost)
         for e in endpoints {
             do {
@@ -218,11 +232,17 @@ enum OverpassService {
                 r.httpMethod = "POST"
                 r.timeoutInterval = 120
                 r.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-                let q = PeakFile.overpassQuery(box).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+                let q = PeakFile.overpassQuery(box, kind: kind).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
                 r.httpBody = Data("data=\(q)".utf8)
                 let (data, resp) = try await URLSession.shared.data(for: r)
                 guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-                return PeakFile.parse(String(decoding: data, as: UTF8.self))
+                // Ways/relations (ski areas) get the same id offset as the CI script.
+                let text = String(decoding: data, as: UTF8.self)
+                return PeakFile.parse(text, kind: kind).map { p in
+                    var q = p
+                    if kind == .skiArea, let n = Int64(p.id.dropFirst(4)) { q.id = "osm:\(n + 1_000_000_000_000)" }
+                    return q
+                }
             } catch { lastError = error }
         }
         throw lastError
